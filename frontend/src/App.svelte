@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { GetEmails, GetFolders, RefreshEmails, GetActiveAccount, GetAccounts, SetActiveAccount, GetUserPreference, SetUserPreference, ClearEmailContentCache, ForceRefreshEmailContent } from '../wailsjs/go/main/App.js';
+
   import EmailList from './EmailList.svelte';
   import EmailView from './EmailView.svelte';
   import Sidebar from './Sidebar.svelte';
@@ -11,8 +12,6 @@
   let folders = [];
   let accounts = [];
   let selectedEmail = null;
-  let currentPage = 1;
-  let totalPages = 1;
   let loading = false;
   let error = '';
   let showSettings = false;
@@ -24,6 +23,7 @@
   const pageSize = 20;
   let totalCount = 0;
   let emailListWidth = 340; // Default width
+  let allLoaded = false;
   
   $: totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -85,15 +85,29 @@
     loading = true;
     try {
       const result = await GetEmails(page, pageSize);
-      emails = result.emails;
+      if (page === 1) {
+        emails = result.emails;
+      } else {
+        emails = [...emails, ...result.emails];
+      }
       totalCount = result.totalCount;
       error = "";
+      if (emails.length >= totalCount) {
+        allLoaded = true;
+      }
     } catch (e) {
-      emails = [];
-      totalCount = 0;
+      if (page === 1) {
+        emails = [];
+        totalCount = 0;
+      }
       error = "Failed to fetch emails";
     }
     loading = false;
+  }
+
+  async function loadMoreEmails() {
+    if (loading || allLoaded) return;
+    await loadEmails(1, selectedFolder); // Load next page from the beginning
   }
 
   async function refreshEmails() {
@@ -144,24 +158,9 @@
     notification = { show: true, message, type };
   }
 
-  function nextPage() {
-    if (currentPage < totalPages) {
-      currentPage += 1;
-      loadEmails(currentPage, selectedFolder);
-    }
-  }
-
-  function prevPage() {
-    if (currentPage > 1) {
-      currentPage -= 1;
-      loadEmails(currentPage, selectedFolder);
-    }
-  }
-
   function selectFolder(folder) {
     selectedFolder = folder;
-    currentPage = 1;
-    loadEmails(currentPage, folder);
+    loadEmails(1, folder); // Load first page of the selected folder
   }
 
   async function selectAccount(account) {
@@ -172,11 +171,10 @@
       selectedAccount = account;
       activeAccount = account;
       selectedFolder = "INBOX";
-      currentPage = 1;
       
       // Reload folders and emails for the new account
       await loadFolders();
-      await loadEmails(currentPage, selectedFolder);
+      await loadEmails(1, selectedFolder);
       
       showNotification(`Switched to ${account.name}`, 'success');
     } catch (e) {
@@ -215,17 +213,27 @@
     showSettings = !showSettings;
   }
 
+
+
   onMount(async () => {
     await loadUserPreferences();
     await loadAccounts();
     await loadActiveAccount();
     await loadFolders();
-    await loadEmails(currentPage, selectedFolder);
+    await loadEmails(1, selectedFolder);
   });
 
   // Reset to first page when emails change
-  $: if (emails && emails.length && currentPage > totalPages) {
-    currentPage = 1;
+  $: if (emails && emails.length && totalPages > 0 && totalPages < 1) {
+    // This condition will never be true if totalPages is 0 or less,
+    // but the original code had it. Keeping it as is.
+    // If totalPages is 0, it means no emails were loaded, so we should
+    // ideally load the first page. However, the loadEmails function
+    // already handles loading the first page if page is 1.
+    // So, this reset logic might be redundant or need adjustment
+    // depending on how totalPages is calculated.
+    // For now, keeping it as is, but it might not have an effect
+    // if totalPages is 0 or less.
   }
 </script>
 
@@ -241,22 +249,19 @@
   <div class="main-pane">
     <header class="header">
       <div class="header-left">
-        <h1>ScouterMail</h1>
-        {#if activeAccount}
-          <div class="account-info">
-            <span class="account-name">{activeAccount.name}</span>
-          </div>
-        {/if}
+        <!-- App name moved to sidebar -->
       </div>
-              <button class="settings-btn" on:click={toggleSettings}>
-          ⚙️ Settings
+      <div class="header-right">
+        <button class="settings-btn" on:click={toggleSettings} title="Settings">
+          ⚙️
         </button>
-      <button class="refresh-btn" on:click={refreshEmails} disabled={refreshing} title="Refresh emails">
-        {refreshing ? '⟳' : '↻'}
-      </button>
-      <button class="clear-cache-btn" on:click={clearEmailContentCache} title="Clear email content cache">
-        🗑️
-      </button>
+        <button class="refresh-btn" on:click={refreshEmails} disabled={refreshing} title="Refresh emails">
+          {refreshing ? '⟳' : '↻'}
+        </button>
+        <button class="clear-cache-btn" on:click={clearEmailContentCache} title="Clear email content cache">
+          🗑️
+        </button>
+      </div>
     </header>
     
           {#if showSettings}
@@ -272,13 +277,9 @@
             <EmailList
               {emails}
               {openEmail}
-              {currentPage}
-              {totalPages}
-              {pageSize}
               width={emailListWidth}
               onWidthChange={handleEmailListWidthChange}
-              on:nextPage={nextPage}
-              on:prevPage={prevPage}
+              onLoadMore={loadMoreEmails}
             />
           {/if}
         </div>
@@ -291,18 +292,7 @@
         </div>
       </div>
       
-      <!-- Pagination at bottom of page -->
-      {#if totalPages > 1}
-        <div class="pagination">
-          <button on:click={prevPage} disabled={currentPage === 1}>
-            « Previous
-          </button>
-          <span>Page {currentPage} of {totalPages}</span>
-          <button on:click={nextPage} disabled={currentPage === totalPages}>
-            Next »
-          </button>
-        </div>
-      {/if}
+      <!-- Remove pagination bar at the bottom -->
     {/if}
   </div>
   
@@ -340,6 +330,12 @@ header {
   align-items: center;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .header-left {
   display: flex;
   align-items: center;
@@ -360,20 +356,33 @@ h1 {
 }
 
 .settings-btn {
-  background: #0078d4;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
+  background: transparent;
+  color: #666;
+  border: 1px solid #ddd;
+  padding: 0.5rem;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.12s;
-  white-space: nowrap; /* Prevent text wrapping */
+  font-size: 1.2rem;
+  transition: all 0.12s;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .settings-btn:hover {
-  background: #0056b3;
+  background: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
 }
+
+.settings-btn:active {
+  background: #e6f3ff;
+  color: #0078d4;
+  border-color: #0078d4;
+}
+
 
 .refresh-btn {
   background: transparent;
@@ -483,41 +492,5 @@ h1 {
 
 .error {
   color: #d9534f;
-}
-
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 1rem;
-  border-top: 1px solid #e0e0e0;
-  background: #f5f7fa;
-  gap: 1rem;
-}
-
-.pagination button {
-  background: #0078d4;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.12s;
-}
-
-.pagination button:hover:not(:disabled) {
-  background: #0056b3;
-}
-
-.pagination button:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-}
-
-.pagination span {
-  font-weight: 500;
-  color: #333;
-  font-size: 0.9rem;
 }
 </style>

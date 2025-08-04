@@ -8,6 +8,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/mail"
+	"regexp"
 	"strings"
 
 	"github.com/emersion/go-imap"
@@ -140,12 +141,15 @@ func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, 
 			}
 		}
 
+		// Generate a simple snippet from subject or use a placeholder
+		snippet := generateSimpleSnippet(msg)
+
 		email := Email{
 			ID:              msg.Uid,
 			From:            msg.Envelope.From[0].MailboxName + "@" + msg.Envelope.From[0].HostName,
 			Subject:         msg.Envelope.Subject,
 			Date:            msg.Envelope.Date.Format("2006-01-02"),
-			Snippet:         "",
+			Snippet:         snippet,
 			AttachmentCount: attachmentCount,
 			Read:            isRead,
 		}
@@ -156,6 +160,245 @@ func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, 
 	}
 
 	return EmailPage{Emails: emails, TotalCount: total}, nil
+}
+
+// generateSimpleSnippet creates a simple snippet without fetching full content
+func generateSimpleSnippet(msg *imap.Message) string {
+	// Use subject as snippet if available
+	if msg.Envelope.Subject != "" {
+		subject := msg.Envelope.Subject
+		if len(subject) > 100 {
+			subject = subject[:100] + "..."
+		}
+		return subject
+	}
+
+	// Fallback to sender info
+	if len(msg.Envelope.From) > 0 {
+		from := msg.Envelope.From[0].MailboxName + "@" + msg.Envelope.From[0].HostName
+		if len(from) > 100 {
+			from = from[:100] + "..."
+		}
+		return from
+	}
+
+	return "No preview available"
+}
+
+// generateSnippet extracts a snippet from the email content
+func generateSnippet(c *client.Client, msg *imap.Message) string {
+	fmt.Printf("DEBUG: Generating snippet for email UID %d\n", msg.Uid)
+
+	if msg.BodyStructure == nil {
+		fmt.Printf("DEBUG: No body structure for email UID %d\n", msg.Uid)
+		return ""
+	}
+
+	// Try to get a small portion of the email body for snippet
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(msg.Uid)
+
+	// Try to get text content from the body structure
+	content := extractSnippetFromBodyStructure(c, seqset, msg.BodyStructure)
+	if content != "" {
+		fmt.Printf("DEBUG: Generated snippet for UID %d: %s\n", msg.Uid, content[:min(50, len(content))])
+		return content
+	}
+
+	fmt.Printf("DEBUG: No snippet generated from body structure for UID %d, trying raw body\n", msg.Uid)
+
+	// Fallback: try to get the full body and extract snippet
+	section := &imap.BodySectionName{}
+	messages := make(chan *imap.Message, 1)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.UidFetch(seqset, []imap.FetchItem{section.FetchItem()}, messages)
+	}()
+
+	for msg := range messages {
+		if msg == nil {
+			continue
+		}
+		if r := msg.GetBody(section); r != nil {
+			b, err := io.ReadAll(r)
+			if err == nil && len(b) > 0 {
+				rawBody := string(b)
+				content := extractSnippetFromRaw(rawBody)
+				if content != "" {
+					fmt.Printf("DEBUG: Generated snippet from raw body for UID %d: %s\n", msg.Uid, content[:min(50, len(content))])
+				} else {
+					fmt.Printf("DEBUG: No snippet generated from raw body for UID %d\n", msg.Uid)
+				}
+				<-done
+				return content
+			}
+		}
+	}
+	<-done
+
+	fmt.Printf("DEBUG: Failed to generate snippet for UID %d\n", msg.Uid)
+	return ""
+}
+
+// extractSnippetFromBodyStructure tries to extract snippet from body structure
+func extractSnippetFromBodyStructure(c *client.Client, seqset *imap.SeqSet, body *imap.BodyStructure) string {
+	if body == nil {
+		return ""
+	}
+
+	fmt.Printf("DEBUG: Extracting snippet from body structure, MIME type: %s\n", body.MIMEType)
+
+	// Handle multipart messages
+	if body.MIMEType == "multipart" && body.Parts != nil {
+		fmt.Printf("DEBUG: Processing multipart message with %d parts\n", len(body.Parts))
+		for i, part := range body.Parts {
+			fmt.Printf("DEBUG: Part %d MIME type: %s\n", i, part.MIMEType)
+			if part.MIMEType == "text/plain" {
+				fmt.Printf("DEBUG: Found text/plain part at index %d, extracting content\n", i)
+				content := extractTextPart(c, seqset, part, "")
+				if content != "" {
+					fmt.Printf("DEBUG: Successfully extracted text/plain content: %s\n", content[:min(50, len(content))])
+					return extractSnippetFromText(content)
+				}
+			}
+		}
+		// If no text/plain, try text/html
+		for i, part := range body.Parts {
+			if part.MIMEType == "text/html" {
+				fmt.Printf("DEBUG: Found text/html part at index %d, extracting content\n", i)
+				content := extractTextPart(c, seqset, part, "")
+				if content != "" {
+					fmt.Printf("DEBUG: Successfully extracted text/html content: %s\n", content[:min(50, len(content))])
+					return extractSnippetFromHTML(content)
+				}
+			}
+		}
+	} else if body.MIMEType == "text/plain" {
+		fmt.Printf("DEBUG: Processing text/plain message\n")
+		content := extractTextPart(c, seqset, body, "")
+		if content != "" {
+			fmt.Printf("DEBUG: Successfully extracted text/plain content: %s\n", content[:min(50, len(content))])
+			return extractSnippetFromText(content)
+		}
+	} else if body.MIMEType == "text/html" {
+		fmt.Printf("DEBUG: Processing text/html message\n")
+		content := extractTextPart(c, seqset, body, "")
+		if content != "" {
+			fmt.Printf("DEBUG: Successfully extracted text/html content: %s\n", content[:min(50, len(content))])
+			return extractSnippetFromHTML(content)
+		}
+	}
+
+	fmt.Printf("DEBUG: No suitable content found in body structure\n")
+	return ""
+}
+
+// extractTextPart extracts text content from a specific part
+func extractTextPart(c *client.Client, seqset *imap.SeqSet, body *imap.BodyStructure, path string) string {
+	section := &imap.BodySectionName{}
+	if path != "" {
+		section.Specifier = imap.PartSpecifier(path)
+	}
+
+	messages := make(chan *imap.Message, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.UidFetch(seqset, []imap.FetchItem{section.FetchItem()}, messages)
+	}()
+
+	for msg := range messages {
+		if msg == nil {
+			continue
+		}
+		if r := msg.GetBody(section); r != nil {
+			b, err := io.ReadAll(r)
+			if err == nil && len(b) > 0 {
+				encoding := body.Encoding
+				decoded := decodeTextContent(b, encoding)
+				<-done
+				return decoded
+			}
+		}
+	}
+	<-done
+	return ""
+}
+
+// extractSnippetFromText extracts a snippet from plain text
+func extractSnippetFromText(text string) string {
+	// Clean the text
+	text = cleanTextContent(text)
+
+	// Remove extra whitespace
+	text = strings.Join(strings.Fields(text), " ")
+
+	// Limit to 150 characters
+	if len(text) > 150 {
+		text = text[:150] + "..."
+	}
+
+	return text
+}
+
+// extractSnippetFromHTML extracts a snippet from HTML content
+func extractSnippetFromHTML(html string) string {
+	// Simple HTML tag removal
+	html = strings.ReplaceAll(html, "<br>", " ")
+	html = strings.ReplaceAll(html, "<br/>", " ")
+	html = strings.ReplaceAll(html, "<br />", " ")
+	html = strings.ReplaceAll(html, "</p>", " ")
+	html = strings.ReplaceAll(html, "</div>", " ")
+
+	// Remove HTML tags
+	re := regexp.MustCompile(`<[^>]*>`)
+	text := re.ReplaceAllString(html, "")
+
+	return extractSnippetFromText(text)
+}
+
+// extractSnippetFromRaw extracts snippet from raw email
+func extractSnippetFromRaw(rawEmail string) string {
+	// Parse the raw email
+	msg, err := mail.ReadMessage(strings.NewReader(rawEmail))
+	if err != nil {
+		return ""
+	}
+
+	// Try to get text content
+	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if err != nil {
+		mediaType = "text/plain"
+	}
+
+	if strings.HasPrefix(mediaType, "multipart/") {
+		boundary := params["boundary"]
+		if boundary == "" {
+			return ""
+		}
+
+		mr := multipart.NewReader(msg.Body, boundary)
+		for {
+			part, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+
+			if part.Header.Get("Content-Type") == "text/plain" {
+				body, err := io.ReadAll(part)
+				if err == nil {
+					return extractSnippetFromText(string(body))
+				}
+			}
+		}
+	} else if mediaType == "text/plain" {
+		body, err := io.ReadAll(msg.Body)
+		if err == nil {
+			return extractSnippetFromText(string(body))
+		}
+	}
+
+	return ""
 }
 
 func FetchFolders(ctx context.Context, account *Account, password string) ([]string, error) {

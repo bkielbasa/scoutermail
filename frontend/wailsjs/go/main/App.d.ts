@@ -18,6 +18,8 @@ export function GetActiveAccount():Promise<main.Account>;
 
 export function GetEmailContent(arg1:number):Promise<main.EmailContent>;
 
+export function GetEmailSnippet(arg1:number):Promise<string>;
+
 export function GetEmails(arg1:number,arg2:number):Promise<main.EmailPage>;
 
 export function GetFolders():Promise<Array<string>>;

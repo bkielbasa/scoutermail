@@ -34,6 +34,10 @@ export function GetEmailContent(arg1) {
   return window['go']['main']['App']['GetEmailContent'](arg1);
 }
 
+export function GetEmailSnippet(arg1) {
+  return window['go']['main']['App']['GetEmailSnippet'](arg1);
+}
+
 export function GetEmails(arg1, arg2) {
   return window['go']['main']['App']['GetEmails'](arg1, arg2);
 }

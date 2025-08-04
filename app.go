@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // App struct
@@ -406,4 +408,58 @@ func (a *App) ForceRefreshEmailContent(uid uint32) error {
 	}
 
 	return nil
+}
+
+// GetEmailSnippet generates a proper snippet for a specific email
+func (a *App) GetEmailSnippet(emailID uint32) (string, error) {
+	// Get active account
+	account, err := a.Database.GetActiveAccount()
+	if err != nil {
+		return "", fmt.Errorf("failed to get active account: %v", err)
+	}
+
+	// Get password
+	password, err := a.Database.GetPassword(account.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get password: %v", err)
+	}
+
+	// Fetch email content to generate snippet
+	content, err := FetchEmailContent(a.Ctx, emailID, account, password)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch email content: %v", err)
+	}
+
+	// Generate snippet from content
+	var snippet string
+	if content.TextBody != "" {
+		snippet = content.TextBody
+	} else if content.HTMLBody != "" {
+		// Simple HTML tag removal for snippet
+		snippet = content.HTMLBody
+		snippet = strings.ReplaceAll(snippet, "<br>", " ")
+		snippet = strings.ReplaceAll(snippet, "<br/>", " ")
+		snippet = strings.ReplaceAll(snippet, "<br />", " ")
+		snippet = strings.ReplaceAll(snippet, "</p>", " ")
+		snippet = strings.ReplaceAll(snippet, "</div>", " ")
+
+		// Remove HTML tags
+		re := regexp.MustCompile(`<[^>]*>`)
+		snippet = re.ReplaceAllString(snippet, "")
+	}
+
+	// Clean and limit snippet
+	if snippet != "" {
+		// Remove extra whitespace
+		snippet = strings.Join(strings.Fields(snippet), " ")
+
+		// Limit to 150 characters
+		if len(snippet) > 150 {
+			snippet = snippet[:150] + "..."
+		}
+	} else {
+		snippet = "No preview available"
+	}
+
+	return snippet, nil
 }

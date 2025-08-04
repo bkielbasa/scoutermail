@@ -2,11 +2,9 @@
   import { createEventDispatcher } from 'svelte';
   export let emails = [];
   export let openEmail;
-  export let currentPage = 1;
-  export let totalPages = 1;
-  export let pageSize = 20;
   export let width = 340; // Default width
   export let onWidthChange;
+  export let onLoadMore;
 
   const dispatch = createEventDispatcher();
 
@@ -14,21 +12,11 @@
   let startX = 0;
   let startWidth = 0;
 
-  function nextPage() {
-    if (currentPage < totalPages) {
-      dispatch('nextPage');
+  function handleScroll(e) {
+    const el = e.target;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      if (onLoadMore) onLoadMore();
     }
-  }
-
-  function prevPage() {
-    if (currentPage > 1) {
-      dispatch('prevPage');
-    }
-  }
-
-  // Reset to first page when emails or folder changes
-  $: if (emails && currentPage > totalPages) {
-    currentPage = 1;
   }
 
   // Debug: Log email data to see attachment counts
@@ -112,14 +100,13 @@
   }
 </script>
 
-<div class="email-list-container" style="width: {width}px;">
+<div class="email-list-container" style="width: {width}px;" on:scroll={handleScroll}>
   <ul class="email-list">
     {#each emails as email}
       <li class="email-item-container">
         <button
           class="email-item {!email.read ? 'unread' : ''}"
           on:click={() => {
-            console.log('Email clicked:', email);
             openEmail(email);
           }}
           on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && openEmail(email)}
@@ -149,7 +136,11 @@
             </div>
             
             <div class="email-snippet">
-              {truncateText(email.snippet || 'No preview available')}
+              {#if email.snippet && email.snippet !== 'No preview available'}
+                {truncateText(email.snippet, 80)}
+              {:else}
+                <span class="no-snippet">Click to view email content</span>
+              {/if}
             </div>
           </div>
         </button>
@@ -294,6 +285,13 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     max-height: 2.6em;
+    line-clamp: 2;
+  }
+
+  .no-snippet {
+    color: #999;
+    font-style: italic;
+    font-size: 0.8rem;
   }
   
   .email-item.unread {

@@ -38,6 +38,9 @@
 </script>
 
 <aside class="sidebar">
+  <div class="app-header">
+    <h1 class="app-title">ScouterMail</h1>
+  </div>
   
   <div class="accounts-section">
     {#each accounts as account}
@@ -112,76 +115,78 @@
 <style>
   .sidebar {
     width: 280px;
-    background: #f3f6f8;
+    background: #f8f9fa;
     border-right: 1px solid #e0e0e0;
-    padding: 0;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
     overflow-y: auto;
-    flex-shrink: 0; /* Prevent shrinking */
   }
-  
-  .sidebar-header {
-    padding: 1.5rem 1rem 1rem 1.5rem;
+
+  .app-header {
+    padding: 1.5rem 1rem 1rem 1rem;
     border-bottom: 1px solid #e0e0e0;
-    background: #f8f9fa;
+    background: #fff;
   }
-  
-  .sidebar-header h2 {
-    font-size: 1.1rem;
+
+  .app-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #1976d2;
     margin: 0;
-    color: #444;
-    font-weight: 600;
+    letter-spacing: -0.5px;
   }
-  
+
   .accounts-section {
+    padding: 1rem;
     flex: 1;
-    padding: 0.5rem 0;
   }
-  
+
   .account-item {
-    margin-bottom: 0.5rem;
+    margin-bottom: 1rem;
   }
-  
-  .account-item.selected {
-    background: #e6f0fa;
-  }
-  
+
   .account-button {
     width: 100%;
-    padding: 0.8rem 1.5rem;
-    border: none;
-    background: none;
-    text-align: left;
+    padding: 0.75rem 1rem;
+    border: 1px solid #e0e0e0;
+    background: #fff;
+    border-radius: 6px;
     cursor: pointer;
-    transition: background 0.13s;
+    transition: all 0.13s;
+    text-align: left;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 0.2rem;
+    gap: 0.25rem;
   }
-  
+
   .account-button:hover {
-    background: #e6f0fa;
+    border-color: #1976d2;
+    background: #f8fbff;
   }
-  
+
+  .account-item.selected .account-button {
+    border-color: #1976d2;
+    background: #e3f2fd;
+  }
+
   .account-name {
     font-weight: 600;
     color: #333;
     font-size: 0.95rem;
   }
-  
+
   .account-email {
     font-size: 0.8rem;
     color: #666;
     font-weight: 400;
   }
-  
+
   .folders-section {
     padding-left: 1rem;
     margin-top: 0.5rem;
   }
-  
+
   .folder-item {
     width: 100%;
     padding: 0.5rem 1rem;
@@ -196,34 +201,34 @@
     font-size: 0.9rem;
     color: #555;
   }
-  
+
   .folder-item:hover {
     background: #e6f0fa;
     color: #1976d2;
   }
-  
+
   .folder-item.selected {
     background: #d1e7ff;
     color: #1976d2;
     font-weight: 500;
   }
-  
+
   .folder-icon {
     font-size: 1rem;
     flex-shrink: 0;
   }
-  
+
   .folder-name {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  
+
   .more-section {
     margin-top: 0.5rem;
   }
-  
+
   .more-toggle {
     width: 100%;
     padding: 0.5rem 1rem;
@@ -238,34 +243,34 @@
     font-size: 0.9rem;
     color: #666;
   }
-  
+
   .more-toggle:hover {
     background: #e6f0fa;
     color: #1976d2;
   }
-  
+
   .more-icon {
     font-size: 0.8rem;
     flex-shrink: 0;
   }
-  
+
   .more-text {
     flex: 1;
   }
-  
+
   .other-folders {
     padding-left: 1rem;
   }
-  
+
   .other-folder {
     font-size: 0.85rem;
     color: #666;
   }
-  
+
   .other-folder:hover {
     color: #1976d2;
   }
-  
+
   .other-folder.selected {
     color: #1976d2;
     font-weight: 500;
