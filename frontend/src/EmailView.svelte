@@ -1,15 +1,54 @@
 <script>
-  import { GetEmailContent, SaveAttachment } from '../wailsjs/go/main/App.js';
+  import { GetEmailContent, SaveAttachment, MarkEmailAsRead, ForceRefreshEmailContent } from '../wailsjs/go/main/App.js';
   import { onMount } from 'svelte';
   import Notification from './Notification.svelte';
   
   export let email;
   export let onBack;
+  export let onEmailRead;
   
   let emailContent = null;
   let loading = false;
   let error = '';
   let notification = { show: false, message: '', type: 'success' };
+  let retryCount = 0;
+  const maxRetries = 2;
+  
+  // Sanitize HTML content to remove problematic CSS
+  function sanitizeHtml(html) {
+    if (!html) return '';
+    
+    // Remove or neutralize problematic CSS
+    let sanitized = html
+      // Remove external stylesheets
+      .replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '')
+      // Remove style tags
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      // Remove inline styles that could break layout
+      .replace(/style=["'][^"']*["']/gi, '')
+      // Remove position: fixed/absolute that could break layout
+      .replace(/position:\s*(fixed|absolute)/gi, 'position: static')
+      // Remove z-index that could cause layering issues
+      .replace(/z-index:\s*[^;]+/gi, '')
+      // Remove width/height that could break responsive design
+      .replace(/width:\s*[^;]+/gi, '')
+      .replace(/height:\s*[^;]+/gi, '')
+      // Remove margin/padding that could break layout
+      .replace(/margin:\s*[^;]+/gi, '')
+      .replace(/padding:\s*[^;]+/gi, '')
+      // Remove background colors that might interfere
+      .replace(/background-color:\s*[^;]+/gi, '')
+      .replace(/background:\s*[^;]+/gi, '')
+      // Remove font-family that might not be available
+      .replace(/font-family:\s*[^;]+/gi, '')
+      // Remove any remaining problematic CSS
+      .replace(/position:\s*[^;]+/gi, '')
+      .replace(/display:\s*[^;]+/gi, '')
+      .replace(/float:\s*[^;]+/gi, '')
+      .replace(/clear:\s*[^;]+/gi, '');
+    
+    return sanitized;
+  }
   
   async function loadEmailContent() {
     if (!email || !email.id) {
@@ -21,12 +60,50 @@
     
     try {
       emailContent = await GetEmailContent(email.id);
+      
+      // Check if we got meaningful content
+      if (!emailContent || (emailContent.textBody === '' && emailContent.htmlBody === '')) {
+        if (retryCount < maxRetries) {
+          retryCount++;
+          console.log(`No content found, retrying... (${retryCount}/${maxRetries})`);
+          // Force refresh the content
+          await ForceRefreshEmailContent(email.id);
+          emailContent = await GetEmailContent(email.id);
+        } else {
+          error = 'No content available. The email might be empty or corrupted.';
+        }
+      } else {
+        retryCount = 0; // Reset retry count on success
+      }
+      
+      // Sanitize HTML content if present
+      if (emailContent && emailContent.htmlBody) {
+        emailContent.htmlBody = sanitizeHtml(emailContent.htmlBody);
+      }
+      
+      // Mark email as read if it's not already read
+      if (!email.read) {
+        try {
+          await MarkEmailAsRead(email.id);
+          // Notify parent component that email was marked as read
+          if (onEmailRead) {
+            onEmailRead(email.id);
+          }
+        } catch (e) {
+          console.error('Error marking email as read:', e);
+        }
+      }
     } catch (e) {
       error = 'Failed to load email content';
       console.error('Error loading email content:', e);
     } finally {
       loading = false;
     }
+  }
+
+  async function retryLoadContent() {
+    retryCount = 0;
+    await loadEmailContent();
   }
 
   function showNotification(message, type = 'success') {
@@ -97,7 +174,12 @@
     {#if loading}
       <div class="loading">Loading content...</div>
     {:else if error}
-      <div class="error">{error}</div>
+      <div class="error">
+        <div>{error}</div>
+        <button class="retry-btn" on:click={retryLoadContent}>
+          🔄 Retry Loading
+        </button>
+      </div>
     {:else if emailContent}
       <!-- Email Body - Show HTML if available, otherwise show text -->
       {#if emailContent.htmlBody}
@@ -134,8 +216,6 @@
             </div>
           {/each}
         </div>
-      {:else}
-        <div>No attachments found in emailContent</div>
       {/if}
     {:else}
       <div class="no-content">No content available</div>
@@ -210,9 +290,28 @@
 
 .error {
   color: #d9534f;
-  font-weight: 500;
+  padding: 1rem;
   text-align: center;
-  padding: 2rem;
+  background: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  margin: 1rem 0;
+}
+
+.retry-btn {
+  background: #0078d4;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+  transition: background 0.12s;
+}
+
+.retry-btn:hover {
+  background: #0056b3;
 }
 
 .no-content {
@@ -227,23 +326,32 @@
 }
 
 .text-content {
-  white-space: pre-wrap;
   line-height: 1.6;
-  background: #f8f9fa;
-  padding: 1.5rem;
-  border-radius: 8px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 0.95rem;
   color: #333;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .html-content {
-  border: 1px solid #e0e0e0;
-  padding: 1.5rem;
-  border-radius: 8px;
-  background: #fff;
   line-height: 1.6;
   color: #333;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+.html-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+.html-content table {
+  max-width: 100%;
+  border-collapse: collapse;
 }
 
 .email-attachments {

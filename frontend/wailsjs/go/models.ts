@@ -48,6 +48,8 @@ export namespace main {
 	    subject: string;
 	    date: string;
 	    snippet: string;
+	    attachmentCount: number;
+	    read: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Email(source);
@@ -60,6 +62,8 @@ export namespace main {
 	        this.subject = source["subject"];
 	        this.date = source["date"];
 	        this.snippet = source["snippet"];
+	        this.attachmentCount = source["attachmentCount"];
+	        this.read = source["read"];
 	    }
 	}
 	export class EmailContent {

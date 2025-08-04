@@ -1,27 +1,73 @@
 <script>
-  import { GetEmails, GetFolders, GetActiveAccount } from '../wailsjs/go/main/App.js';
-  import Sidebar from './Sidebar.svelte';
+  import { onMount } from 'svelte';
+  import { GetEmails, GetFolders, RefreshEmails, GetActiveAccount, GetAccounts, SetActiveAccount, GetUserPreference, SetUserPreference, ClearEmailContentCache, ForceRefreshEmailContent } from '../wailsjs/go/main/App.js';
   import EmailList from './EmailList.svelte';
   import EmailView from './EmailView.svelte';
-  import AccountManager from './AccountManager.svelte';
-  import { onMount } from 'svelte';
-
-  let folders = [];
+  import Sidebar from './Sidebar.svelte';
+  import Settings from './Settings.svelte';
+  import Notification from './Notification.svelte';
+  
   let emails = [];
-  let totalCount = 0;
-  let currentPage = 1;
-  const pageSize = 20;
-  $: totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  let loading = false;
-  let error = "";
-  let selectedFolder = "INBOX";
+  let folders = [];
+  let accounts = [];
   let selectedEmail = null;
-  let showAccountManager = false;
+  let currentPage = 1;
+  let totalPages = 1;
+  let loading = false;
+  let error = '';
+  let showSettings = false;
   let activeAccount = null;
+  let selectedAccount = null;
+  let notification = { show: false, message: '', type: 'success' };
+  let refreshing = false;
+  let selectedFolder = "INBOX";
+  const pageSize = 20;
+  let totalCount = 0;
+  let emailListWidth = 340; // Default width
+  
+  $: totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  async function loadUserPreferences() {
+    try {
+      const savedWidth = await GetUserPreference('emailListWidth');
+      if (savedWidth) {
+        emailListWidth = parseInt(savedWidth) || 340;
+      }
+    } catch (e) {
+      console.error('Failed to load user preferences:', e);
+    }
+  }
+
+  async function saveUserPreferences() {
+    try {
+      await SetUserPreference('emailListWidth', emailListWidth.toString());
+    } catch (e) {
+      console.error('Failed to save user preferences:', e);
+    }
+  }
+
+  async function loadAccounts() {
+    try {
+      accounts = await GetAccounts();
+      if (accounts.length > 0) {
+        // Set the first account as selected if none is selected
+        if (!selectedAccount) {
+          selectedAccount = accounts[0];
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load accounts:', e);
+      accounts = [];
+    }
+  }
 
   async function loadActiveAccount() {
     try {
       activeAccount = await GetActiveAccount();
+      // If we have a selected account, use it as active
+      if (selectedAccount) {
+        activeAccount = selectedAccount;
+      }
     } catch (e) {
       console.error('Failed to load active account:', e);
     }
@@ -50,6 +96,54 @@
     loading = false;
   }
 
+  async function refreshEmails() {
+    if (refreshing) return;
+    
+    refreshing = true;
+    try {
+      await RefreshEmails();
+      await loadEmails();
+      showNotification('Emails refreshed successfully', 'success');
+    } catch (e) {
+      console.error('Error refreshing emails:', e);
+      const errorMessage = e?.message || e?.toString() || 'Unknown error occurred';
+      showNotification('Failed to refresh emails: ' + errorMessage, 'error');
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  async function clearEmailContentCache() {
+    try {
+      await ClearEmailContentCache();
+      showNotification('Email content cache cleared', 'success');
+    } catch (e) {
+      console.error('Error clearing email content cache:', e);
+      const errorMessage = e?.message || e?.toString() || 'Unknown error occurred';
+      showNotification('Failed to clear email content cache: ' + errorMessage, 'error');
+    }
+  }
+
+  async function forceRefreshEmailContent(emailId) {
+    try {
+      await ForceRefreshEmailContent(emailId);
+      showNotification('Email content refreshed', 'success');
+      // Reload the email if it's currently selected
+      if (selectedEmail && selectedEmail.id === emailId) {
+        // Trigger a reload of the email content
+        selectedEmail = { ...selectedEmail }; // Force re-render
+      }
+    } catch (e) {
+      console.error('Error refreshing email content:', e);
+      const errorMessage = e?.message || e?.toString() || 'Unknown error occurred';
+      showNotification('Failed to refresh email content: ' + errorMessage, 'error');
+    }
+  }
+
+  function showNotification(message, type = 'success') {
+    notification = { show: true, message, type };
+  }
+
   function nextPage() {
     if (currentPage < totalPages) {
       currentPage += 1;
@@ -70,19 +164,60 @@
     loadEmails(currentPage, folder);
   }
 
+  async function selectAccount(account) {
+    try {
+      // Set the account as active in the backend
+      await SetActiveAccount(account.id);
+      
+      selectedAccount = account;
+      activeAccount = account;
+      selectedFolder = "INBOX";
+      currentPage = 1;
+      
+      // Reload folders and emails for the new account
+      await loadFolders();
+      await loadEmails(currentPage, selectedFolder);
+      
+      showNotification(`Switched to ${account.name}`, 'success');
+    } catch (e) {
+      console.error('Error switching account:', e);
+      showNotification('Failed to switch account', 'error');
+    }
+  }
+
+  function handleEmailListWidthChange(newWidth) {
+    emailListWidth = newWidth;
+    // Save the preference after a short delay to avoid too many saves
+    setTimeout(() => {
+      saveUserPreferences();
+    }, 500);
+  }
+
   function openEmail(email) {
     selectedEmail = email;
   }
-
+  
   function closeEmail() {
     selectedEmail = null;
   }
+  
+  function handleEmailRead(emailId) {
+    // Update the email's read status in the emails array
+    emails = emails.map(email => {
+      if (email.id === emailId) {
+        return { ...email, read: true };
+      }
+      return email;
+    });
+  }
 
-  function toggleAccountManager() {
-    showAccountManager = !showAccountManager;
+  function toggleSettings() {
+    showSettings = !showSettings;
   }
 
   onMount(async () => {
+    await loadUserPreferences();
+    await loadAccounts();
     await loadActiveAccount();
     await loadFolders();
     await loadEmails(currentPage, selectedFolder);
@@ -95,25 +230,40 @@
 </script>
 
 <main class="outlook-layout">
-  <Sidebar {folders} {selectedFolder} {selectFolder} />
+  <Sidebar 
+    {folders} 
+    {selectedFolder} 
+    {selectFolder} 
+    {accounts} 
+    {selectedAccount} 
+    {selectAccount} 
+  />
   <div class="main-pane">
-    <header>
+    <header class="header">
       <div class="header-left">
-        <h1>{selectedFolder}</h1>
+        <h1>ScouterMail</h1>
         {#if activeAccount}
-          <span class="account-info">({activeAccount.name})</span>
+          <div class="account-info">
+            <span class="account-name">{activeAccount.name}</span>
+          </div>
         {/if}
       </div>
-      <button class="settings-btn" on:click={toggleAccountManager}>
-        ⚙️ Accounts
+              <button class="settings-btn" on:click={toggleSettings}>
+          ⚙️ Settings
+        </button>
+      <button class="refresh-btn" on:click={refreshEmails} disabled={refreshing} title="Refresh emails">
+        {refreshing ? '⟳' : '↻'}
+      </button>
+      <button class="clear-cache-btn" on:click={clearEmailContentCache} title="Clear email content cache">
+        🗑️
       </button>
     </header>
     
-    {#if showAccountManager}
-      <AccountManager />
-    {:else}
-      <div class="content-row">
-        <div class="email-list-pane">
+          {#if showSettings}
+        <Settings on:close={() => showSettings = false} />
+      {:else}
+      <div class="content-row" style="--email-list-width: {emailListWidth}px;">
+        <div class="email-list-pane" style="width: {emailListWidth}px;">
           {#if loading}
             <div class="loading">Loading...</div>
           {:else if error}
@@ -125,6 +275,8 @@
               {currentPage}
               {totalPages}
               {pageSize}
+              width={emailListWidth}
+              onWidthChange={handleEmailListWidthChange}
               on:nextPage={nextPage}
               on:prevPage={prevPage}
             />
@@ -132,7 +284,7 @@
         </div>
         <div class="email-view-pane">
           {#if selectedEmail}
-            <EmailView email={selectedEmail} onBack={closeEmail} />
+            <EmailView email={selectedEmail} onBack={closeEmail} onEmailRead={handleEmailRead} />
           {:else}
             <div class="placeholder">Select an email to view its content</div>
           {/if}
@@ -153,6 +305,13 @@
       {/if}
     {/if}
   </div>
+  
+  <!-- Notification -->
+  <Notification 
+    bind:show={notification.show}
+    message={notification.message} 
+    type={notification.type} 
+  />
 </main>
 
 <style>
@@ -161,6 +320,7 @@
   min-height: 100vh;
   background: #f7f9fa;
   font-family: system-ui, sans-serif;
+  width: 100%;
 }
 
 .main-pane {
@@ -168,6 +328,7 @@
   display: flex;
   flex-direction: column;
   background: #fff;
+  min-width: 0; /* Allow flex item to shrink below content size */
 }
 
 header {
@@ -214,17 +375,86 @@ h1 {
   background: #0056b3;
 }
 
+.refresh-btn {
+  background: transparent;
+  color: #666;
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: all 0.12s;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.refresh-btn:hover {
+  background: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
+}
+
+.refresh-btn:disabled {
+  background: #f9f9f9;
+  color: #ccc;
+  cursor: not-allowed;
+  border-color: #eee;
+}
+
+.refresh-btn:disabled:hover {
+  background: #f9f9f9;
+  color: #ccc;
+}
+
+.clear-cache-btn {
+  background: transparent;
+  color: #666;
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: all 0.12s;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clear-cache-btn:hover {
+  background: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
+}
+
+.clear-cache-btn:disabled {
+  background: #f9f9f9;
+  color: #ccc;
+  cursor: not-allowed;
+  border-color: #eee;
+}
+
+.clear-cache-btn:disabled:hover {
+  background: #f9f9f9;
+  color: #ccc;
+}
+
 .content-row {
   display: flex;
   flex: 1;
   min-height: 0;
+  width: 100%;
 }
 
 .email-list-pane {
-  width: 340px;
   border-right: 1px solid #e0e0e0;
   overflow-y: auto;
   background: #fafdff;
+  flex-shrink: 0; /* Prevent shrinking */
 }
 
 .email-view-pane {
@@ -235,6 +465,8 @@ h1 {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  width: calc(100% - var(--email-list-width, 340px)); /* Use CSS variable for dynamic width */
+  max-width: calc(100% - var(--email-list-width, 340px)); /* Ensure it doesn't exceed available space */
 }
 
 .placeholder {

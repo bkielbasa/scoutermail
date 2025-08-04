@@ -17,11 +17,13 @@ import (
 )
 
 type Email struct {
-	ID      uint32 `json:"id"`
-	From    string `json:"from"`
-	Subject string `json:"subject"`
-	Date    string `json:"date"`
-	Snippet string `json:"snippet"`
+	ID              uint32 `json:"id"`
+	From            string `json:"from"`
+	Subject         string `json:"subject"`
+	Date            string `json:"date"`
+	Snippet         string `json:"snippet"`
+	AttachmentCount int    `json:"attachmentCount"`
+	Read            bool   `json:"read"`
 }
 
 type EmailPage struct {
@@ -43,33 +45,42 @@ type Attachment struct {
 	Data        string `json:"data"` // Base64 encoded
 }
 
-func FetchEmails(ctx context.Context, page int, pageSize int) (EmailPage, error) {
-	// Get active account from database
-	app := &App{}
-	if app.Database == nil {
-		app.Database, _ = NewDatabase()
+// countAttachments recursively counts attachments in a message body structure
+func countAttachments(body *imap.BodyStructure) int {
+	if body == nil {
+		return 0
 	}
 
-	account, err := app.Database.GetActiveAccount()
-	if err != nil {
-		return EmailPage{}, fmt.Errorf("failed to get active account: %v", err)
+	count := 0
+
+	// Only count as attachment if it has explicit attachment disposition
+	if body.Disposition == "attachment" {
+		fmt.Printf("DEBUG: Found attachment - Disposition: %s, MIMEType: %s, Filename: %s\n",
+			body.Disposition, body.MIMEType, body.DispositionParams["filename"])
+		count++
 	}
 
-	password, err := app.Database.GetPassword(account.ID)
-	if err != nil {
-		return EmailPage{}, fmt.Errorf("failed to get password: %v", err)
+	// Recursively check child parts
+	if body.Parts != nil {
+		for _, part := range body.Parts {
+			count += countAttachments(part)
+		}
 	}
 
+	return count
+}
+
+func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, password string) (EmailPage, error) {
 	// Connect to server
 	var c *client.Client
-	var err2 error
+	var err error
 	if account.UseSSL {
-		c, err2 = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
+		c, err = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
 	} else {
-		c, err2 = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
+		c, err = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
 	}
-	if err2 != nil {
-		return EmailPage{}, err2
+	if err != nil {
+		return EmailPage{}, err
 	}
 	defer c.Logout()
 
@@ -114,48 +125,49 @@ func FetchEmails(ctx context.Context, page int, pageSize int) (EmailPage, error)
 
 	var emails []Email
 	for msg := range messages {
-		email := Email{
-			ID:      msg.Uid,
-			From:    msg.Envelope.From[0].MailboxName + "@" + msg.Envelope.From[0].HostName,
-			Subject: msg.Envelope.Subject,
-			Date:    msg.Envelope.Date.Format("2006-01-02"),
-			Snippet: "",
+		// Count attachments from body structure
+		attachmentCount := 0
+		if msg.BodyStructure != nil {
+			attachmentCount = countAttachments(msg.BodyStructure)
 		}
-		fmt.Printf("Created email with ID: %d, Subject: %s\n", email.ID, email.Subject)
+
+		// Check if email is read based on IMAP flags
+		isRead := false
+		for _, flag := range msg.Flags {
+			if flag == imap.SeenFlag {
+				isRead = true
+				break
+			}
+		}
+
+		email := Email{
+			ID:              msg.Uid,
+			From:            msg.Envelope.From[0].MailboxName + "@" + msg.Envelope.From[0].HostName,
+			Subject:         msg.Envelope.Subject,
+			Date:            msg.Envelope.Date.Format("2006-01-02"),
+			Snippet:         "",
+			AttachmentCount: attachmentCount,
+			Read:            isRead,
+		}
 		emails = append([]Email{email}, emails...) // Prepend to reverse order (most recent first)
 	}
 	if err := <-done; err != nil {
 		return EmailPage{}, err
 	}
+
 	return EmailPage{Emails: emails, TotalCount: total}, nil
 }
 
-func FetchFolders(ctx context.Context) ([]string, error) {
-	// Get active account from database
-	app := &App{}
-	if app.Database == nil {
-		app.Database, _ = NewDatabase()
-	}
-
-	account, err := app.Database.GetActiveAccount()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active account: %v", err)
-	}
-
-	password, err := app.Database.GetPassword(account.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get password: %v", err)
-	}
-
+func FetchFolders(ctx context.Context, account *Account, password string) ([]string, error) {
 	var c *client.Client
-	var err2 error
+	var err error
 	if account.UseSSL {
-		c, err2 = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
+		c, err = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
 	} else {
-		c, err2 = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
+		c, err = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
 	}
-	if err2 != nil {
-		return nil, err2
+	if err != nil {
+		return nil, err
 	}
 	defer c.Logout()
 
@@ -184,32 +196,16 @@ func FetchFolders(ctx context.Context) ([]string, error) {
 	}
 }
 
-func FetchEmailContent(ctx context.Context, uid uint32) (EmailContent, error) {
-	// Get active account from database
-	app := &App{}
-	if app.Database == nil {
-		app.Database, _ = NewDatabase()
-	}
-
-	account, err := app.Database.GetActiveAccount()
-	if err != nil {
-		return EmailContent{}, fmt.Errorf("failed to get active account: %v", err)
-	}
-
-	password, err := app.Database.GetPassword(account.ID)
-	if err != nil {
-		return EmailContent{}, fmt.Errorf("failed to get password: %v", err)
-	}
-
+func FetchEmailContent(ctx context.Context, uid uint32, account *Account, password string) (EmailContent, error) {
 	var c *client.Client
-	var err2 error
+	var err error
 	if account.UseSSL {
-		c, err2 = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
+		c, err = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
 	} else {
-		c, err2 = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
+		c, err = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
 	}
-	if err2 != nil {
-		return EmailContent{}, err2
+	if err != nil {
+		return EmailContent{}, err
 	}
 	defer c.Logout()
 
@@ -225,29 +221,51 @@ func FetchEmailContent(ctx context.Context, uid uint32) (EmailContent, error) {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(uid)
 
-	section := &imap.BodySectionName{}
+	// Try multiple approaches to get the email content
+	var rawBody string
+	var bodyStructure *imap.BodyStructure
+
+	// First, try to get the full message
 	messages := make(chan *imap.Message, 1)
 	done := make(chan error, 1)
+
+	go func() {
+		done <- c.UidFetch(seqset, []imap.FetchItem{imap.FetchBodyStructure}, messages)
+	}()
+
+	for msg := range messages {
+		if msg == nil {
+			continue
+		}
+		bodyStructure = msg.BodyStructure
+	}
+
+	if err := <-done; err != nil {
+		return EmailContent{}, err
+	}
+
+	// Try to get the body using different approaches
+	section := &imap.BodySectionName{}
+	messages = make(chan *imap.Message, 1)
+	done = make(chan error, 1)
+
 	go func() {
 		done <- c.UidFetch(seqset, []imap.FetchItem{section.FetchItem()}, messages)
 	}()
 
-	var rawBody string
 	for msg := range messages {
 		if msg == nil {
 			continue
 		}
 		if r := msg.GetBody(section); r != nil {
 			b, err := io.ReadAll(r)
-			if err != nil {
-				continue
-			}
-			rawBody = string(b)
-			if len(rawBody) > 0 {
+			if err == nil && len(b) > 0 {
+				rawBody = string(b)
 				break
 			}
 		}
 	}
+
 	if err := <-done; err != nil {
 		return EmailContent{}, err
 	}
@@ -262,14 +280,128 @@ func FetchEmailContent(ctx context.Context, uid uint32) (EmailContent, error) {
 		return EmailContent{}, err
 	}
 
+	// If we still don't have content, try to extract from body structure
+	if content.TextBody == "" && content.HTMLBody == "" && bodyStructure != nil {
+		content = extractFromBodyStructure(c, seqset, bodyStructure)
+	}
+
 	return content, nil
+}
+
+// extractFromBodyStructure extracts content from IMAP body structure
+func extractFromBodyStructure(c *client.Client, seqset *imap.SeqSet, body *imap.BodyStructure) EmailContent {
+	content := EmailContent{
+		Headers:     make(map[string]string),
+		TextBody:    "",
+		HTMLBody:    "",
+		Attachments: []Attachment{},
+	}
+
+	// Recursively extract content from body structure
+	extractParts(c, seqset, body, "", &content)
+
+	return content
+}
+
+// extractParts recursively extracts content from body structure parts
+func extractParts(c *client.Client, seqset *imap.SeqSet, body *imap.BodyStructure, path string, content *EmailContent) {
+	if body == nil {
+		return
+	}
+
+	// Handle multipart messages
+	if strings.HasPrefix(body.MIMEType, "multipart/") {
+		for i, part := range body.Parts {
+			partPath := path
+			if partPath != "" {
+				partPath += "."
+			}
+			partPath += fmt.Sprintf("%d", i+1)
+			extractParts(c, seqset, part, partPath, content)
+		}
+		return
+	}
+
+	// Handle single part
+	if body.MIMEType == "text/plain" || body.MIMEType == "text/html" {
+		section := &imap.BodySectionName{}
+		if path != "" {
+			section.Specifier = imap.PartSpecifier(path)
+		}
+
+		messages := make(chan *imap.Message, 1)
+		done := make(chan error, 1)
+		go func() {
+			done <- c.UidFetch(seqset, []imap.FetchItem{section.FetchItem()}, messages)
+		}()
+
+		for msg := range messages {
+			if msg == nil {
+				continue
+			}
+			if r := msg.GetBody(section); r != nil {
+				b, err := io.ReadAll(r)
+				if err == nil && len(b) > 0 {
+					encoding := body.Encoding
+					decoded := decodeTextContent(b, encoding)
+
+					if body.MIMEType == "text/plain" {
+						content.TextBody = decoded
+					} else if body.MIMEType == "text/html" {
+						content.HTMLBody = decoded
+					}
+					break
+				}
+			}
+		}
+		<-done
+	} else {
+		// Handle attachments
+		section := &imap.BodySectionName{}
+		if path != "" {
+			section.Specifier = imap.PartSpecifier(path)
+		}
+
+		messages := make(chan *imap.Message, 1)
+		done := make(chan error, 1)
+		go func() {
+			done <- c.UidFetch(seqset, []imap.FetchItem{section.FetchItem()}, messages)
+		}()
+
+		for msg := range messages {
+			if msg == nil {
+				continue
+			}
+			if r := msg.GetBody(section); r != nil {
+				b, err := io.ReadAll(r)
+				if err == nil && len(b) > 0 {
+					filename := body.Description
+					if filename == "" {
+						filename = "attachment"
+					}
+
+					attachment := Attachment{
+						Filename:    filename,
+						ContentType: body.MIMEType,
+						Size:        len(b),
+						Data:        base64.StdEncoding.EncodeToString(b),
+					}
+					content.Attachments = append(content.Attachments, attachment)
+					break
+				}
+			}
+		}
+		<-done
+	}
 }
 
 func parseRawEmail(rawEmail string) (EmailContent, error) {
 	// Parse the email using net/mail
 	msg, err := mail.ReadMessage(strings.NewReader(rawEmail))
 	if err != nil {
-		return EmailContent{}, fmt.Errorf("failed to parse email: %v", err)
+		// If parsing fails, try to extract content directly
+		fmt.Printf("DEBUG: Failed to parse email with mail.ReadMessage: %v\n", err)
+		return extractContentFromRaw(rawEmail), nil
 	}
 
 	content := EmailContent{
@@ -323,13 +455,29 @@ func parseRawEmail(rawEmail string) (EmailContent, error) {
 				partMediaType = "text/plain"
 			}
 
+			// Debug: Log encoding information for problematic content
+			encoding := part.Header.Get("Content-Transfer-Encoding")
+			if strings.Contains(string(partData), "=20") || strings.Contains(string(partData), "&zwj;") {
+				fmt.Printf("DEBUG: Found problematic content in %s part\n", partMediaType)
+				fmt.Printf("DEBUG: Content-Transfer-Encoding: %s\n", encoding)
+				fmt.Printf("DEBUG: Raw content preview: %s\n", string(partData[:min(200, len(partData))]))
+			}
+
 			switch partMediaType {
 			case "text/plain":
 				encoding := part.Header.Get("Content-Transfer-Encoding")
-				content.TextBody = decodeTextContent(partData, encoding)
+				decoded := decodeTextContent(partData, encoding)
+				if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
+					fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
+				}
+				content.TextBody = decoded
 			case "text/html":
 				encoding := part.Header.Get("Content-Transfer-Encoding")
-				content.HTMLBody = decodeTextContent(partData, encoding)
+				decoded := decodeTextContent(partData, encoding)
+				if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
+					fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
+				}
+				content.HTMLBody = decoded
 			default:
 				// Handle attachments
 				filename := part.FileName()
@@ -367,50 +515,299 @@ func parseRawEmail(rawEmail string) (EmailContent, error) {
 			return EmailContent{}, fmt.Errorf("failed to read text body: %v", err)
 		}
 		encoding := msg.Header.Get("Content-Transfer-Encoding")
-		content.TextBody = decodeTextContent(body, encoding)
+
+		// Debug: Log encoding information for problematic content
+		if strings.Contains(string(body), "=20") || strings.Contains(string(body), "&zwj;") {
+			fmt.Printf("DEBUG: Found problematic content in text/plain\n")
+			fmt.Printf("DEBUG: Content-Transfer-Encoding: %s\n", encoding)
+			fmt.Printf("DEBUG: Raw content preview: %s\n", string(body[:min(200, len(body))]))
+		}
+
+		decoded := decodeTextContent(body, encoding)
+		if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
+			fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
+		}
+		content.TextBody = decoded
 	} else if mediaType == "text/html" {
 		body, err := io.ReadAll(msg.Body)
 		if err != nil {
 			return EmailContent{}, fmt.Errorf("failed to read html body: %v", err)
 		}
 		encoding := msg.Header.Get("Content-Transfer-Encoding")
-		content.HTMLBody = decodeTextContent(body, encoding)
+
+		// Debug: Log encoding information for problematic content
+		if strings.Contains(string(body), "=20") || strings.Contains(string(body), "&zwj;") {
+			fmt.Printf("DEBUG: Found problematic content in text/html\n")
+			fmt.Printf("DEBUG: Content-Transfer-Encoding: %s\n", encoding)
+			fmt.Printf("DEBUG: Raw content preview: %s\n", string(body[:min(200, len(body))]))
+		}
+
+		decoded := decodeTextContent(body, encoding)
+		if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
+			fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
+		}
+		content.HTMLBody = decoded
+	}
+
+	// If we still don't have content, try to extract from raw email
+	if content.TextBody == "" && content.HTMLBody == "" {
+		fmt.Printf("DEBUG: No content extracted from parsed email, trying raw extraction\n")
+		rawContent := extractContentFromRaw(rawEmail)
+		if rawContent.TextBody != "" || rawContent.HTMLBody != "" {
+			return rawContent, nil
+		}
 	}
 
 	return content, nil
+}
+
+// extractContentFromRaw tries to extract content from raw email when parsing fails
+func extractContentFromRaw(rawEmail string) EmailContent {
+	content := EmailContent{
+		Headers:     make(map[string]string),
+		TextBody:    "",
+		HTMLBody:    "",
+		Attachments: []Attachment{},
+	}
+
+	// Try to find content boundaries
+	lines := strings.Split(rawEmail, "\n")
+	var inBody bool
+	var bodyLines []string
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" && !inBody {
+			inBody = true
+			continue
+		}
+		if inBody {
+			bodyLines = append(bodyLines, line)
+		}
+	}
+
+	if len(bodyLines) > 0 {
+		bodyText := strings.Join(bodyLines, "\n")
+
+		// Try to detect if it's HTML or plain text
+		if strings.Contains(bodyText, "<html") || strings.Contains(bodyText, "<body") || strings.Contains(bodyText, "<div") {
+			content.HTMLBody = bodyText
+		} else {
+			content.TextBody = bodyText
+		}
+	}
+
+	return content
+}
+
+// min helper function for debug logging
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func decodeTextContent(data []byte, encoding string) string {
 	// Handle different encodings
 	switch strings.ToLower(encoding) {
 	case "quoted-printable":
-		// For now, just return as string - quoted-printable is mostly ASCII
-		return string(data)
+		// Properly decode quoted-printable encoding
+		decoded := decodeQuotedPrintable(string(data))
+		return cleanTextContent(decoded)
 	case "base64":
 		decoded, err := base64.StdEncoding.DecodeString(string(data))
 		if err != nil {
-			return string(data) // Return original if decoding fails
+			return cleanTextContent(string(data)) // Return original if decoding fails
 		}
-		return string(decoded)
+		return cleanTextContent(string(decoded))
 	case "7bit", "8bit":
-		return string(data)
+		return cleanTextContent(string(data))
 	default:
 		// Try to detect and handle character encodings
 		if strings.Contains(strings.ToLower(encoding), "iso-8859-1") {
 			reader := transform.NewReader(strings.NewReader(string(data)), charmap.ISO8859_1.NewDecoder())
 			decoded, err := io.ReadAll(reader)
 			if err != nil {
-				return string(data)
+				return cleanTextContent(string(data))
 			}
-			return string(decoded)
+			return cleanTextContent(string(decoded))
 		}
-		return string(data)
+
+		// If no specific encoding is detected, try to clean up the content anyway
+		// This handles cases where the encoding header is missing or incorrect
+		content := string(data)
+
+		// Check if the content looks like quoted-printable (contains =XX patterns)
+		if strings.Contains(content, "=") {
+			// Try quoted-printable decoding as fallback
+			decoded := decodeQuotedPrintable(content)
+			if decoded != content {
+				return cleanTextContent(decoded)
+			}
+		}
+
+		// Additional aggressive cleanup for problematic content
+		if strings.Contains(content, "=20") || strings.Contains(content, "=C") || strings.Contains(content, "&= ") || strings.Contains(content, "&zw= ") || strings.Contains(content, "&nbs= ") {
+			// This looks like quoted-printable content that wasn't properly decoded
+			// Try to manually decode common patterns
+			cleaned := content
+			cleaned = strings.ReplaceAll(cleaned, "=20", " ")
+			cleaned = strings.ReplaceAll(cleaned, "=C4=99", "ę")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=82", "ł")
+			cleaned = strings.ReplaceAll(cleaned, "=C3=B3", "ó")
+			cleaned = strings.ReplaceAll(cleaned, "=C2=A0", " ")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=9A", "Ś")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=BC", "ż")
+			cleaned = strings.ReplaceAll(cleaned, "=C4=85", "ą")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=84", "ń")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=9B", "ś")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=BA", "ź")
+			cleaned = strings.ReplaceAll(cleaned, "=C4=87", "ć")
+			cleaned = strings.ReplaceAll(cleaned, "=C5=BC", "ż")
+			cleaned = strings.ReplaceAll(cleaned, "&= ", "&")
+			cleaned = strings.ReplaceAll(cleaned, "= ;", "")
+			cleaned = strings.ReplaceAll(cleaned, "<= ", "<")
+			cleaned = strings.ReplaceAll(cleaned, "= ", "")
+
+			// Fix broken HTML entities
+			cleaned = strings.ReplaceAll(cleaned, "&zw= nj;", "")
+			cleaned = strings.ReplaceAll(cleaned, "&nbs= p;", " ")
+			cleaned = strings.ReplaceAll(cleaned, "&= nbsp;", " ")
+			cleaned = strings.ReplaceAll(cleaned, "&zw= ", "")
+			cleaned = strings.ReplaceAll(cleaned, "&nbs= ", " ")
+
+			return cleanTextContent(cleaned)
+		}
+
+		return cleanTextContent(content)
+	}
+}
+
+// decodeQuotedPrintable decodes quoted-printable encoded text
+func decodeQuotedPrintable(input string) string {
+	var result strings.Builder
+	i := 0
+
+	for i < len(input) {
+		if input[i] == '=' {
+			// Check if we have enough characters for a hex pair
+			if i+2 < len(input) {
+				// Try to decode the hex pair
+				if hex1, ok := hexChar(input[i+1]); ok {
+					if hex2, ok := hexChar(input[i+2]); ok {
+						// Valid hex pair, decode it
+						decoded := byte(hex1<<4 | hex2)
+						result.WriteByte(decoded)
+						i += 3
+						continue
+					}
+				}
+			}
+			// If we can't decode it, just skip the '='
+			i++
+		} else {
+			result.WriteByte(input[i])
+			i++
+		}
+	}
+
+	// Clean up the decoded text
+	return cleanTextContent(result.String())
+}
+
+// cleanTextContent removes common HTML entities and cleans up text
+func cleanTextContent(text string) string {
+	// Replace common HTML entities
+	replacements := map[string]string{
+		"&nbsp;": " ",
+		"&amp;":  "&",
+		"&lt;":   "<",
+		"&gt;":   ">",
+		"&quot;": "\"",
+		"&#39;":  "'",
+		"&zwj;":  "", // Zero-width joiner
+		"&zwnj;": "", // Zero-width non-joiner
+		"&lrm;":  "", // Left-to-right mark
+		"&rlm;":  "", // Right-to-left mark
+	}
+
+	result := text
+	for entity, replacement := range replacements {
+		result = strings.ReplaceAll(result, entity, replacement)
+	}
+
+	// Remove excessive whitespace
+	result = strings.TrimSpace(result)
+
+	// Replace multiple spaces with single space
+	for strings.Contains(result, "  ") {
+		result = strings.ReplaceAll(result, "  ", " ")
+	}
+
+	// Remove zero-width characters and other invisible characters
+	result = strings.Map(func(r rune) rune {
+		if r == 0x200B || r == 0x200C || r == 0x200D || r == 0xFEFF {
+			return -1 // Remove these characters
+		}
+		return r
+	}, result)
+
+	// Additional cleanup for broken HTML tags and entities
+	result = strings.ReplaceAll(result, "<= ", "<")
+	result = strings.ReplaceAll(result, "= ;", "")
+	result = strings.ReplaceAll(result, "= ;", "")
+	result = strings.ReplaceAll(result, "= ", "")
+	result = strings.ReplaceAll(result, "= ", "")
+	result = strings.ReplaceAll(result, "&= ", "&")
+	result = strings.ReplaceAll(result, "&= ", "&")
+
+	// Fix broken HTML entities that were split by quoted-printable encoding
+	result = strings.ReplaceAll(result, "&zw= nj;", "")
+	result = strings.ReplaceAll(result, "&nbs= p;", " ")
+	result = strings.ReplaceAll(result, "&= nbsp;", " ")
+	result = strings.ReplaceAll(result, "&nbs= p;", " ")
+	result = strings.ReplaceAll(result, "&= nbsp;", " ")
+
+	// Remove any remaining broken entities
+	result = strings.ReplaceAll(result, "&zw= ", "")
+	result = strings.ReplaceAll(result, "&nbs= ", " ")
+	result = strings.ReplaceAll(result, "&= ", "&")
+
+	return result
+}
+
+// hexChar converts a hex character to its value
+func hexChar(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	default:
+		return 0, false
 	}
 }
 
 func DownloadAttachment(ctx context.Context, uid uint32, filename string) (string, error) {
 	// First, get the email content to find the attachment
-	emailContent, err := FetchEmailContent(ctx, uid)
+	app := &App{}
+	if app.Database == nil {
+		app.Database, _ = NewDatabase()
+	}
+
+	account, err := app.Database.GetActiveAccount()
+	if err != nil {
+		return "", fmt.Errorf("failed to get active account: %v", err)
+	}
+
+	password, err := app.Database.GetPassword(account.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get password: %v", err)
+	}
+
+	emailContent, err := FetchEmailContent(ctx, uid, account, password)
 	if err != nil {
 		return "", fmt.Errorf("failed to get email content: %v", err)
 	}
@@ -426,4 +823,45 @@ func DownloadAttachment(ctx context.Context, uid uint32, filename string) (strin
 	}
 
 	return "", fmt.Errorf("attachment not found: %s", filename)
+}
+
+// markEmailAsReadOnServer marks an email as read on the IMAP server
+func markEmailAsReadOnServer(ctx context.Context, emailID uint32, account *Account, password string) error {
+	// Connect to server
+	var c *client.Client
+	var err error
+	if account.UseSSL {
+		c, err = client.DialTLS(fmt.Sprintf("%s:%d", account.EmailServer, account.Port), nil)
+	} else {
+		c, err = client.Dial(fmt.Sprintf("%s:%d", account.EmailServer, account.Port))
+	}
+	if err != nil {
+		return err
+	}
+	defer c.Logout()
+
+	// Login
+	if err := c.Login(account.Username, password); err != nil {
+		return err
+	}
+
+	// Select INBOX
+	_, err = c.Select("INBOX", false)
+	if err != nil {
+		return err
+	}
+
+	// Create sequence set for the specific email
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(emailID)
+
+	// Mark the email as seen
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	flags := []interface{}{imap.SeenFlag}
+	err = c.UidStore(seqset, item, flags, nil)
+	if err != nil {
+		return fmt.Errorf("failed to mark email as read: %v", err)
+	}
+
+	return nil
 }
