@@ -4,40 +4,14 @@
   export let openEmail;
   export let width = 340; // Default width
   export let onWidthChange;
-  export let onLoadMore;
+  export let loading = false;
+  export let allLoaded = false; // New variable to track if all emails are loaded
 
   const dispatch = createEventDispatcher();
 
   let isResizing = false;
   let startX = 0;
   let startWidth = 0;
-
-  function handleScroll(e) {
-    const el = e.target;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
-      if (onLoadMore) onLoadMore();
-    }
-  }
-
-  // Debug: Log email data to see attachment counts
-  $: if (emails && emails.length > 0) {
-    console.log('Full email objects:', emails);
-    console.log('Emails with attachment counts:', emails.map(e => ({
-      subject: e.subject,
-      attachmentCount: e.attachmentCount,
-      hasAttachmentCount: 'attachmentCount' in e,
-      type: typeof e.attachmentCount
-    })));
-    
-    // Log emails that show attachments
-    const emailsWithAttachments = emails.filter(e => e.attachmentCount > 0);
-    if (emailsWithAttachments.length > 0) {
-      console.log('Emails showing attachment icons:', emailsWithAttachments.map(e => ({
-        subject: e.subject,
-        attachmentCount: e.attachmentCount
-      })));
-    }
-  }
 
   function startResize(e) {
     isResizing = true;
@@ -100,7 +74,7 @@
   }
 </script>
 
-<div class="email-list-container" style="width: {width}px;" on:scroll={handleScroll}>
+<div class="email-list-container" style="width: {width}px;">
   <ul class="email-list">
     {#each emails as email}
       <li class="email-item-container">
@@ -147,6 +121,13 @@
       </li>
     {/each}
   </ul>
+  
+  {#if loading}
+    <div class="loading-more">
+      <div class="loading-spinner">⟳</div>
+      <span>Loading more emails...</span>
+    </div>
+  {/if}
   
   <!-- Resize handle -->
   <div 
@@ -326,5 +307,30 @@
   
   .resize-handle:active {
     background: rgba(0, 120, 212, 0.4);
+  }
+
+  .other-folder.selected {
+    color: #1976d2;
+    font-weight: 500;
+  }
+
+  .loading-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    color: #666;
+    font-size: 0.9rem;
+  }
+
+  .loading-spinner {
+    animation: spin 1s linear infinite;
+    font-size: 1.2rem;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 </style>

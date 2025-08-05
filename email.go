@@ -13,8 +13,6 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
-	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/transform"
 )
 
 type Email struct {
@@ -72,6 +70,8 @@ func countAttachments(body *imap.BodyStructure) int {
 }
 
 func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, password string) (EmailPage, error) {
+	fmt.Printf("DEBUG: FetchEmails called with page=%d, pageSize=%d\n", page, pageSize)
+
 	// Connect to server
 	var c *client.Client
 	var err error
@@ -96,6 +96,8 @@ func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, 
 		return EmailPage{}, err
 	}
 	total := mbox.Messages
+	fmt.Printf("DEBUG: Total messages in mailbox: %d\n", total)
+
 	if total == 0 {
 		return EmailPage{Emails: []Email{}, TotalCount: 0}, nil
 	}
@@ -105,6 +107,7 @@ func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, 
 	startIndex := uint32((page - 1) * pageSize)
 
 	if startIndex >= total {
+		fmt.Printf("DEBUG: startIndex (%d) >= total (%d), returning empty result\n", startIndex, total)
 		return EmailPage{Emails: []Email{}, TotalCount: total}, nil
 	}
 
@@ -114,6 +117,8 @@ func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, 
 	if from < 1 {
 		from = 1
 	}
+
+	fmt.Printf("DEBUG: Fetching messages from %d to %d (page %d)\n", from, to, page)
 
 	seqset := new(imap.SeqSet)
 	seqset.AddRange(from, to)
@@ -159,30 +164,17 @@ func FetchEmails(ctx context.Context, page int, pageSize int, account *Account, 
 		return EmailPage{}, err
 	}
 
+	fmt.Printf("DEBUG: Returning %d emails for page %d\n", len(emails), page)
 	return EmailPage{Emails: emails, TotalCount: total}, nil
 }
 
 // generateSimpleSnippet creates a simple snippet without fetching full content
 func generateSimpleSnippet(msg *imap.Message) string {
-	// Use subject as snippet if available
-	if msg.Envelope.Subject != "" {
-		subject := msg.Envelope.Subject
-		if len(subject) > 100 {
-			subject = subject[:100] + "..."
-		}
-		return subject
+	// Use subject as snippet, or a simple placeholder
+	if msg.Envelope != nil && msg.Envelope.Subject != "" {
+		return msg.Envelope.Subject
 	}
-
-	// Fallback to sender info
-	if len(msg.Envelope.From) > 0 {
-		from := msg.Envelope.From[0].MailboxName + "@" + msg.Envelope.From[0].HostName
-		if len(from) > 100 {
-			from = from[:100] + "..."
-		}
-		return from
-	}
-
-	return "No preview available"
+	return "No subject"
 }
 
 // generateSnippet extracts a snippet from the email content
@@ -698,29 +690,11 @@ func parseRawEmail(rawEmail string) (EmailContent, error) {
 				partMediaType = "text/plain"
 			}
 
-			// Debug: Log encoding information for problematic content
-			encoding := part.Header.Get("Content-Transfer-Encoding")
-			if strings.Contains(string(partData), "=20") || strings.Contains(string(partData), "&zwj;") {
-				fmt.Printf("DEBUG: Found problematic content in %s part\n", partMediaType)
-				fmt.Printf("DEBUG: Content-Transfer-Encoding: %s\n", encoding)
-				fmt.Printf("DEBUG: Raw content preview: %s\n", string(partData[:min(200, len(partData))]))
-			}
-
 			switch partMediaType {
 			case "text/plain":
-				encoding := part.Header.Get("Content-Transfer-Encoding")
-				decoded := decodeTextContent(partData, encoding)
-				if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
-					fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
-				}
-				content.TextBody = decoded
+				content.TextBody = string(partData)
 			case "text/html":
-				encoding := part.Header.Get("Content-Transfer-Encoding")
-				decoded := decodeTextContent(partData, encoding)
-				if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
-					fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
-				}
-				content.HTMLBody = decoded
+				content.HTMLBody = string(partData)
 			default:
 				// Handle attachments
 				filename := part.FileName()
@@ -728,26 +702,11 @@ func parseRawEmail(rawEmail string) (EmailContent, error) {
 					filename = "attachment"
 				}
 
-				// Check if the data is already base64 encoded
-				encoding := part.Header.Get("Content-Transfer-Encoding")
-				var decodedData []byte
-
-				if strings.ToLower(encoding) == "base64" {
-					// Data is already base64 encoded, decode it
-					decodedData, err = base64.StdEncoding.DecodeString(string(partData))
-					if err != nil {
-						decodedData = partData
-					}
-				} else {
-					// Data is not base64 encoded, use as-is
-					decodedData = partData
-				}
-
 				attachment := Attachment{
 					Filename:    filename,
 					ContentType: partMediaType,
-					Size:        len(decodedData),
-					Data:        base64.StdEncoding.EncodeToString(decodedData), // Store decoded data as base64
+					Size:        len(partData),
+					Data:        base64.StdEncoding.EncodeToString(partData),
 				}
 				content.Attachments = append(content.Attachments, attachment)
 			}
@@ -757,39 +716,13 @@ func parseRawEmail(rawEmail string) (EmailContent, error) {
 		if err != nil {
 			return EmailContent{}, fmt.Errorf("failed to read text body: %v", err)
 		}
-		encoding := msg.Header.Get("Content-Transfer-Encoding")
-
-		// Debug: Log encoding information for problematic content
-		if strings.Contains(string(body), "=20") || strings.Contains(string(body), "&zwj;") {
-			fmt.Printf("DEBUG: Found problematic content in text/plain\n")
-			fmt.Printf("DEBUG: Content-Transfer-Encoding: %s\n", encoding)
-			fmt.Printf("DEBUG: Raw content preview: %s\n", string(body[:min(200, len(body))]))
-		}
-
-		decoded := decodeTextContent(body, encoding)
-		if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
-			fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
-		}
-		content.TextBody = decoded
+		content.TextBody = string(body)
 	} else if mediaType == "text/html" {
 		body, err := io.ReadAll(msg.Body)
 		if err != nil {
 			return EmailContent{}, fmt.Errorf("failed to read html body: %v", err)
 		}
-		encoding := msg.Header.Get("Content-Transfer-Encoding")
-
-		// Debug: Log encoding information for problematic content
-		if strings.Contains(string(body), "=20") || strings.Contains(string(body), "&zwj;") {
-			fmt.Printf("DEBUG: Found problematic content in text/html\n")
-			fmt.Printf("DEBUG: Content-Transfer-Encoding: %s\n", encoding)
-			fmt.Printf("DEBUG: Raw content preview: %s\n", string(body[:min(200, len(body))]))
-		}
-
-		decoded := decodeTextContent(body, encoding)
-		if strings.Contains(decoded, "=20") || strings.Contains(decoded, "&zwj;") {
-			fmt.Printf("DEBUG: Still problematic after decoding: %s\n", decoded[:min(200, len(decoded))])
-		}
-		content.HTMLBody = decoded
+		content.HTMLBody = string(body)
 	}
 
 	// If we still don't have content, try to extract from raw email
@@ -851,172 +784,20 @@ func min(a, b int) int {
 }
 
 func decodeTextContent(data []byte, encoding string) string {
-	// Handle different encodings
-	switch strings.ToLower(encoding) {
-	case "quoted-printable":
-		// Properly decode quoted-printable encoding
-		decoded := decodeQuotedPrintable(string(data))
-		return cleanTextContent(decoded)
-	case "base64":
-		decoded, err := base64.StdEncoding.DecodeString(string(data))
-		if err != nil {
-			return cleanTextContent(string(data)) // Return original if decoding fails
-		}
-		return cleanTextContent(string(decoded))
-	case "7bit", "8bit":
-		return cleanTextContent(string(data))
-	default:
-		// Try to detect and handle character encodings
-		if strings.Contains(strings.ToLower(encoding), "iso-8859-1") {
-			reader := transform.NewReader(strings.NewReader(string(data)), charmap.ISO8859_1.NewDecoder())
-			decoded, err := io.ReadAll(reader)
-			if err != nil {
-				return cleanTextContent(string(data))
-			}
-			return cleanTextContent(string(decoded))
-		}
-
-		// If no specific encoding is detected, try to clean up the content anyway
-		// This handles cases where the encoding header is missing or incorrect
-		content := string(data)
-
-		// Check if the content looks like quoted-printable (contains =XX patterns)
-		if strings.Contains(content, "=") {
-			// Try quoted-printable decoding as fallback
-			decoded := decodeQuotedPrintable(content)
-			if decoded != content {
-				return cleanTextContent(decoded)
-			}
-		}
-
-		// Additional aggressive cleanup for problematic content
-		if strings.Contains(content, "=20") || strings.Contains(content, "=C") || strings.Contains(content, "&= ") || strings.Contains(content, "&zw= ") || strings.Contains(content, "&nbs= ") {
-			// This looks like quoted-printable content that wasn't properly decoded
-			// Try to manually decode common patterns
-			cleaned := content
-			cleaned = strings.ReplaceAll(cleaned, "=20", " ")
-			cleaned = strings.ReplaceAll(cleaned, "=C4=99", "ę")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=82", "ł")
-			cleaned = strings.ReplaceAll(cleaned, "=C3=B3", "ó")
-			cleaned = strings.ReplaceAll(cleaned, "=C2=A0", " ")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=9A", "Ś")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=BC", "ż")
-			cleaned = strings.ReplaceAll(cleaned, "=C4=85", "ą")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=84", "ń")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=9B", "ś")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=BA", "ź")
-			cleaned = strings.ReplaceAll(cleaned, "=C4=87", "ć")
-			cleaned = strings.ReplaceAll(cleaned, "=C5=BC", "ż")
-			cleaned = strings.ReplaceAll(cleaned, "&= ", "&")
-			cleaned = strings.ReplaceAll(cleaned, "= ;", "")
-			cleaned = strings.ReplaceAll(cleaned, "<= ", "<")
-			cleaned = strings.ReplaceAll(cleaned, "= ", "")
-
-			// Fix broken HTML entities
-			cleaned = strings.ReplaceAll(cleaned, "&zw= nj;", "")
-			cleaned = strings.ReplaceAll(cleaned, "&nbs= p;", " ")
-			cleaned = strings.ReplaceAll(cleaned, "&= nbsp;", " ")
-			cleaned = strings.ReplaceAll(cleaned, "&zw= ", "")
-			cleaned = strings.ReplaceAll(cleaned, "&nbs= ", " ")
-
-			return cleanTextContent(cleaned)
-		}
-
-		return cleanTextContent(content)
-	}
+	// Return raw content without any processing
+	return string(data)
 }
 
 // decodeQuotedPrintable decodes quoted-printable encoded text
 func decodeQuotedPrintable(input string) string {
-	var result strings.Builder
-	i := 0
-
-	for i < len(input) {
-		if input[i] == '=' {
-			// Check if we have enough characters for a hex pair
-			if i+2 < len(input) {
-				// Try to decode the hex pair
-				if hex1, ok := hexChar(input[i+1]); ok {
-					if hex2, ok := hexChar(input[i+2]); ok {
-						// Valid hex pair, decode it
-						decoded := byte(hex1<<4 | hex2)
-						result.WriteByte(decoded)
-						i += 3
-						continue
-					}
-				}
-			}
-			// If we can't decode it, just skip the '='
-			i++
-		} else {
-			result.WriteByte(input[i])
-			i++
-		}
-	}
-
-	// Clean up the decoded text
-	return cleanTextContent(result.String())
+	// Return raw content without any processing
+	return input
 }
 
 // cleanTextContent removes common HTML entities and cleans up text
 func cleanTextContent(text string) string {
-	// Replace common HTML entities
-	replacements := map[string]string{
-		"&nbsp;": " ",
-		"&amp;":  "&",
-		"&lt;":   "<",
-		"&gt;":   ">",
-		"&quot;": "\"",
-		"&#39;":  "'",
-		"&zwj;":  "", // Zero-width joiner
-		"&zwnj;": "", // Zero-width non-joiner
-		"&lrm;":  "", // Left-to-right mark
-		"&rlm;":  "", // Right-to-left mark
-	}
-
-	result := text
-	for entity, replacement := range replacements {
-		result = strings.ReplaceAll(result, entity, replacement)
-	}
-
-	// Remove excessive whitespace
-	result = strings.TrimSpace(result)
-
-	// Replace multiple spaces with single space
-	for strings.Contains(result, "  ") {
-		result = strings.ReplaceAll(result, "  ", " ")
-	}
-
-	// Remove zero-width characters and other invisible characters
-	result = strings.Map(func(r rune) rune {
-		if r == 0x200B || r == 0x200C || r == 0x200D || r == 0xFEFF {
-			return -1 // Remove these characters
-		}
-		return r
-	}, result)
-
-	// Additional cleanup for broken HTML tags and entities
-	result = strings.ReplaceAll(result, "<= ", "<")
-	result = strings.ReplaceAll(result, "= ;", "")
-	result = strings.ReplaceAll(result, "= ;", "")
-	result = strings.ReplaceAll(result, "= ", "")
-	result = strings.ReplaceAll(result, "= ", "")
-	result = strings.ReplaceAll(result, "&= ", "&")
-	result = strings.ReplaceAll(result, "&= ", "&")
-
-	// Fix broken HTML entities that were split by quoted-printable encoding
-	result = strings.ReplaceAll(result, "&zw= nj;", "")
-	result = strings.ReplaceAll(result, "&nbs= p;", " ")
-	result = strings.ReplaceAll(result, "&= nbsp;", " ")
-	result = strings.ReplaceAll(result, "&nbs= p;", " ")
-	result = strings.ReplaceAll(result, "&= nbsp;", " ")
-
-	// Remove any remaining broken entities
-	result = strings.ReplaceAll(result, "&zw= ", "")
-	result = strings.ReplaceAll(result, "&nbs= ", " ")
-	result = strings.ReplaceAll(result, "&= ", "&")
-
-	return result
+	// Return raw content without any processing
+	return text
 }
 
 // hexChar converts a hex character to its value

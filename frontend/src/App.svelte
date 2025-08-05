@@ -23,9 +23,69 @@
   const pageSize = 20;
   let totalCount = 0;
   let emailListWidth = 340; // Default width
+  let nextPage = 1;
   let allLoaded = false;
-  
+
   $: totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  async function loadEmails(page, folder) {
+    if (loading) return;
+    
+    console.log('Loading emails:', { page, folder, loading, allLoaded });
+    loading = true;
+    error = null;
+    
+    try {
+      const result = await GetEmails(page, pageSize);
+      console.log('GetEmails result:', result);
+      
+      if (result && result.emails) {
+        if (page === 1) {
+          // First page - replace the list
+          emails = result.emails;
+          nextPage = 2;
+          allLoaded = false;
+        } else {
+          // Subsequent pages - append to existing list
+          emails = [...emails, ...result.emails];
+          nextPage = page + 1;
+        }
+        
+        totalCount = result.totalCount || 0;
+        
+        // Check if we've loaded all emails
+        if (result.emails.length < pageSize) {
+          allLoaded = true;
+        }
+        
+        console.log('Emails loaded:', { 
+          emailsLength: emails.length, 
+          nextPage, 
+          allLoaded, 
+          totalCount 
+        });
+      }
+    } catch (e) {
+      console.error('Error loading emails:', e);
+      error = e?.message || e?.toString() || 'Failed to load emails';
+    } finally {
+      loading = false;
+      console.log('Loading set to false');
+    }
+  }
+
+  async function loadMoreEmails(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (loading || allLoaded) {
+      console.log('loadMoreEmails blocked:', { loading, allLoaded });
+      return;
+    }
+    
+    console.log('Loading more emails, page:', nextPage);
+    await loadEmails(nextPage, selectedFolder);
+  }
 
   async function loadUserPreferences() {
     try {
@@ -81,35 +141,6 @@
     }
   }
 
-  async function loadEmails(page = 1, folder = "INBOX") {
-    loading = true;
-    try {
-      const result = await GetEmails(page, pageSize);
-      if (page === 1) {
-        emails = result.emails;
-      } else {
-        emails = [...emails, ...result.emails];
-      }
-      totalCount = result.totalCount;
-      error = "";
-      if (emails.length >= totalCount) {
-        allLoaded = true;
-      }
-    } catch (e) {
-      if (page === 1) {
-        emails = [];
-        totalCount = 0;
-      }
-      error = "Failed to fetch emails";
-    }
-    loading = false;
-  }
-
-  async function loadMoreEmails() {
-    if (loading || allLoaded) return;
-    await loadEmails(1, selectedFolder); // Load next page from the beginning
-  }
-
   async function refreshEmails() {
     if (refreshing) return;
     
@@ -160,27 +191,23 @@
 
   function selectFolder(folder) {
     selectedFolder = folder;
+    nextPage = 1;
+    allLoaded = false;
     loadEmails(1, folder); // Load first page of the selected folder
   }
 
   async function selectAccount(account) {
-    try {
-      // Set the account as active in the backend
-      await SetActiveAccount(account.id);
-      
-      selectedAccount = account;
-      activeAccount = account;
-      selectedFolder = "INBOX";
-      
-      // Reload folders and emails for the new account
-      await loadFolders();
-      await loadEmails(1, selectedFolder);
-      
-      showNotification(`Switched to ${account.name}`, 'success');
-    } catch (e) {
-      console.error('Error switching account:', e);
-      showNotification('Failed to switch account', 'error');
-    }
+    selectedAccount = account;
+    activeAccount = account;
+    selectedFolder = "INBOX";
+    nextPage = 1;
+    allLoaded = false;
+    
+    // Reload folders and emails for the new account
+    await loadFolders();
+    await loadEmails(1, selectedFolder);
+    
+    showNotification(`Switched to ${account.name}`, 'success');
   }
 
   function handleEmailListWidthChange(newWidth) {
@@ -213,8 +240,6 @@
     showSettings = !showSettings;
   }
 
-
-
   onMount(async () => {
     await loadUserPreferences();
     await loadAccounts();
@@ -238,63 +263,85 @@
 </script>
 
 <main class="outlook-layout">
-  <Sidebar 
-    {folders} 
-    {selectedFolder} 
-    {selectFolder} 
-    {accounts} 
-    {selectedAccount} 
-    {selectAccount} 
-  />
-  <div class="main-pane">
-    <header class="header">
-      <div class="header-left">
-        <!-- App name moved to sidebar -->
-      </div>
-      <div class="header-right">
-        <button class="settings-btn" on:click={toggleSettings} title="Settings">
-          ⚙️
-        </button>
-        <button class="refresh-btn" on:click={refreshEmails} disabled={refreshing} title="Refresh emails">
-          {refreshing ? '⟳' : '↻'}
-        </button>
-        <button class="clear-cache-btn" on:click={clearEmailContentCache} title="Clear email content cache">
-          🗑️
-        </button>
-      </div>
-    </header>
-    
-          {#if showSettings}
+  <div class="main-content">
+    <Sidebar 
+      {folders} 
+      {selectedFolder} 
+      {selectFolder} 
+      {accounts} 
+      {selectedAccount} 
+      {selectAccount} 
+    />
+    <div class="main-pane">
+      <header class="header">
+        <div class="header-left">
+          <!-- App name moved to sidebar -->
+        </div>
+        <div class="header-right">
+          <button class="settings-btn" on:click={toggleSettings} title="Settings">
+            ⚙️
+          </button>
+          <button class="refresh-btn" on:click={refreshEmails} disabled={refreshing} title="Refresh emails">
+            {refreshing ? '⟳' : '↻'}
+          </button>
+          <button class="clear-cache-btn" on:click={clearEmailContentCache} title="Clear email content cache">
+            🗑️
+          </button>
+        </div>
+      </header>
+      
+      {#if showSettings}
         <Settings on:close={() => showSettings = false} />
       {:else}
-      <div class="content-row" style="--email-list-width: {emailListWidth}px;">
-        <div class="email-list-pane" style="width: {emailListWidth}px;">
-          {#if loading}
-            <div class="loading">Loading...</div>
-          {:else if error}
-            <div class="error">{error}</div>
-          {:else}
-            <EmailList
-              {emails}
-              {openEmail}
-              width={emailListWidth}
-              onWidthChange={handleEmailListWidthChange}
-              onLoadMore={loadMoreEmails}
-            />
-          {/if}
+        <div class="content-row" style="--email-list-width: {emailListWidth}px;">
+          <div class="email-list-pane" style="width: {emailListWidth}px;">
+            {#if loading}
+              <div class="loading">Loading...</div>
+            {:else if error}
+              <div class="error">{error}</div>
+            {:else}
+              <EmailList
+                {emails}
+                {openEmail}
+                width={emailListWidth}
+                onWidthChange={handleEmailListWidthChange}
+                {loading}
+                {allLoaded}
+              />
+            {/if}
+            
+            <!-- Load More button below email list -->
+            {#if !loading && !error && !allLoaded && emails.length > 0}
+              <div class="load-more-container">
+                <button class="load-more-btn" on:click|preventDefault={loadMoreEmails}>
+                  Load More Emails
+                </button>
+              </div>
+            {/if}
+          </div>
+          
+          <div class="email-view-pane">
+            {#if selectedEmail}
+              <EmailView email={selectedEmail} onBack={closeEmail} onEmailRead={handleEmailRead} />
+            {:else}
+              <div class="placeholder">Select an email to view its content</div>
+            {/if}
+          </div>
         </div>
-        <div class="email-view-pane">
-          {#if selectedEmail}
-            <EmailView email={selectedEmail} onBack={closeEmail} onEmailRead={handleEmailRead} />
-          {:else}
-            <div class="placeholder">Select an email to view its content</div>
-          {/if}
-        </div>
-      </div>
-      
-      <!-- Remove pagination bar at the bottom -->
-    {/if}
+        
+        <!-- Remove pagination bar at the bottom -->
+      {/if}
+    </div>
   </div>
+  
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="footer-content">
+      <span class="app-name">ScouterMail</span>
+      <span class="footer-divider">•</span>
+      <span class="footer-text">Email client for modern productivity</span>
+    </div>
+  </footer>
   
   <!-- Notification -->
   <Notification 
@@ -307,10 +354,17 @@
 <style>
 .outlook-layout {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background: #f7f9fa;
   font-family: system-ui, sans-serif;
   width: 100%;
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .main-pane {
@@ -492,5 +546,71 @@ h1 {
 
 .error {
   color: #d9534f;
+}
+
+.app-footer {
+  background: #f5f7fa;
+  border-top: 1px solid #e0e0e0;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.footer-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.app-name {
+  font-weight: 600;
+  color: #1976d2;
+}
+
+.footer-divider {
+  color: #ccc;
+}
+
+.footer-text {
+  color: #888;
+}
+
+.load-more-container {
+  padding: 1rem 1.5rem;
+  text-align: center;
+  background: #f5f7fa;
+  border-top: 1px solid #e0e0e0;
+}
+
+.load-more-btn {
+  background: #1976d2;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: background-color 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.load-more-btn:hover {
+  background: #1565c0;
+}
+
+.load-more-btn:active {
+  background: #0d47a1;
+}
+
+.load-more-btn:disabled {
+  background: #ccc;
+  color: #666;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 </style>

@@ -13,43 +13,7 @@
   let notification = { show: false, message: '', type: 'success' };
   let retryCount = 0;
   const maxRetries = 2;
-  
-  // Sanitize HTML content to remove problematic CSS
-  function sanitizeHtml(html) {
-    if (!html) return '';
-    
-    // Remove or neutralize problematic CSS
-    let sanitized = html
-      // Remove external stylesheets
-      .replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '')
-      // Remove style tags
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      // Remove inline styles that could break layout
-      .replace(/style=["'][^"']*["']/gi, '')
-      // Remove position: fixed/absolute that could break layout
-      .replace(/position:\s*(fixed|absolute)/gi, 'position: static')
-      // Remove z-index that could cause layering issues
-      .replace(/z-index:\s*[^;]+/gi, '')
-      // Remove width/height that could break responsive design
-      .replace(/width:\s*[^;]+/gi, '')
-      .replace(/height:\s*[^;]+/gi, '')
-      // Remove margin/padding that could break layout
-      .replace(/margin:\s*[^;]+/gi, '')
-      .replace(/padding:\s*[^;]+/gi, '')
-      // Remove background colors that might interfere
-      .replace(/background-color:\s*[^;]+/gi, '')
-      .replace(/background:\s*[^;]+/gi, '')
-      // Remove font-family that might not be available
-      .replace(/font-family:\s*[^;]+/gi, '')
-      // Remove any remaining problematic CSS
-      .replace(/position:\s*[^;]+/gi, '')
-      .replace(/display:\s*[^;]+/gi, '')
-      .replace(/float:\s*[^;]+/gi, '')
-      .replace(/clear:\s*[^;]+/gi, '');
-    
-    return sanitized;
-  }
-  
+
   async function loadEmailContent() {
     if (!email || !email.id) {
       return;
@@ -74,11 +38,6 @@
         }
       } else {
         retryCount = 0; // Reset retry count on success
-      }
-      
-      // Sanitize HTML content if present
-      if (emailContent && emailContent.htmlBody) {
-        emailContent.htmlBody = sanitizeHtml(emailContent.htmlBody);
       }
       
       // Mark email as read if it's not already read
