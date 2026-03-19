@@ -1,4 +1,4 @@
-build/bin
 node_modules
 frontend/dist
 .superpowers/
+src-tauri/target
