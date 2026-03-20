@@ -36,7 +36,8 @@ pub fn normalize_subject(subject: &str) -> String {
 
 /// Case-insensitive prefix strip for simple prefixes like "re:" or "fwd:".
 fn strip_prefix_ci(s: &str, prefix: &str) -> Option<String> {
-    if s.len() >= prefix.len()
+    if s.is_char_boundary(prefix.len())
+        && s.len() >= prefix.len()
         && s[..prefix.len()].eq_ignore_ascii_case(prefix)
     {
         Some(s[prefix.len()..].to_string())
@@ -48,7 +49,7 @@ fn strip_prefix_ci(s: &str, prefix: &str) -> Option<String> {
 /// Strip prefixes like "Re[2]:" or "Fwd[3]:" — case insensitive.
 fn strip_bracketed_prefix_ci(s: &str, keyword: &str) -> Option<String> {
     let klen = keyword.len();
-    if s.len() <= klen {
+    if s.len() <= klen || !s.is_char_boundary(klen) {
         return None;
     }
     if !s[..klen].eq_ignore_ascii_case(keyword) {
