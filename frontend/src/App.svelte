@@ -1,17 +1,36 @@
-<main>
-  <p>ScouterMail</p>
-</main>
+<script lang="ts">
+  import StatusBar from '$lib/components/StatusBar.svelte';
+  import HintBar from '$lib/components/HintBar.svelte';
+</script>
+
+<div id="app">
+  <StatusBar />
+  <main class="content">
+    <div class="message-list-pane">
+      <p style="color: var(--text-dim); padding: 12px;">Message list</p>
+    </div>
+    <div class="reading-pane">
+      <p style="color: var(--text-dim); padding: 12px;">Reading pane</p>
+    </div>
+  </main>
+  <HintBar />
+</div>
+
 <style>
-  :global(body) {
-    margin: 0;
-    background: #0d0d14;
-    color: #e0e0e0;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  }
-  main {
+  .content {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
+    flex: 1;
+    overflow: hidden;
+  }
+  .message-list-pane {
+    width: 33%;
+    min-width: 250px;
+    max-width: 500px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .reading-pane {
+    flex: 1;
+    overflow-y: auto;
   }
 </style>
