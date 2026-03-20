@@ -3,6 +3,7 @@
   import StatusBar from '$lib/components/StatusBar.svelte';
   import HintBar from '$lib/components/HintBar.svelte';
   import MessageList from '$lib/components/MessageList.svelte';
+  import ReadingPane from '$lib/components/ReadingPane.svelte';
   import { handleKeyDown, setBindings } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
 
@@ -20,7 +21,7 @@
       <MessageList />
     </div>
     <div class="reading-pane">
-      <p style="color: var(--text-dim); padding: 12px;">Reading pane</p>
+      <ReadingPane />
     </div>
   </main>
   <HintBar />
