@@ -93,12 +93,20 @@ pub async fn send_email(config: &SmtpConfig, email: &ComposeEmail) -> Result<(),
 
     let creds = Credentials::new(config.username.clone(), config.password.clone());
 
-    let transport =
+    // Port 465 uses implicit TLS; port 587/25 use STARTTLS
+    let transport = if config.port == 465 {
+        AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
+            .map_err(|e| SmtpError::Send(format!("failed to create SMTP transport: {}", e)))?
+            .port(config.port)
+            .credentials(creds)
+            .build()
+    } else {
         AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)
             .map_err(|e| SmtpError::Send(format!("failed to create SMTP transport: {}", e)))?
             .port(config.port)
             .credentials(creds)
-            .build();
+            .build()
+    };
 
     transport
         .send(message)
