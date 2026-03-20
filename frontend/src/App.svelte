@@ -1,6 +1,15 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import StatusBar from '$lib/components/StatusBar.svelte';
   import HintBar from '$lib/components/HintBar.svelte';
+  import { handleKeyDown, setBindings } from '$lib/keybindings/engine';
+  import { defaultBindings } from '$lib/keybindings/bindings';
+
+  onMount(() => {
+    setBindings(defaultBindings);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 </script>
 
 <div id="app">
