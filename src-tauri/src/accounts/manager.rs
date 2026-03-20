@@ -54,7 +54,7 @@ pub fn provider_defaults(provider: &str) -> Option<(String, u16, String, u16)> {
             "imap.gmail.com".to_string(),
             993,
             "smtp.gmail.com".to_string(),
-            587,
+            465,
         )),
         "outlook" | "hotmail" => Some((
             "outlook.office365.com".to_string(),
@@ -66,7 +66,7 @@ pub fn provider_defaults(provider: &str) -> Option<(String, u16, String, u16)> {
             "imap.mail.yahoo.com".to_string(),
             993,
             "smtp.mail.yahoo.com".to_string(),
-            587,
+            465,
         )),
         _ => None,
     }
