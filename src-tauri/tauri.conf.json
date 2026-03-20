@@ -15,8 +15,12 @@
         "title": "ScouterMail",
         "width": 1200,
         "height": 800,
+        "minWidth": 800,
+        "minHeight": 500,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
       }
     ],
     "security": {
