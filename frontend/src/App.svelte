@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import StatusBar from '$lib/components/StatusBar.svelte';
   import HintBar from '$lib/components/HintBar.svelte';
+  import MessageList from '$lib/components/MessageList.svelte';
   import { handleKeyDown, setBindings } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
 
@@ -16,7 +17,7 @@
   <StatusBar />
   <main class="content">
     <div class="message-list-pane">
-      <p style="color: var(--text-dim); padding: 12px;">Message list</p>
+      <MessageList />
     </div>
     <div class="reading-pane">
       <p style="color: var(--text-dim); padding: 12px;">Reading pane</p>
