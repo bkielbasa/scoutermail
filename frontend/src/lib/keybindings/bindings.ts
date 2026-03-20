@@ -33,6 +33,10 @@ export const defaultBindings: BindingDef[] = [
   { keys: 'H', action: 'show-headers', mode: 'NORMAL', description: 'Show headers' },
   { keys: 'v', action: 'enter-visual', mode: 'NORMAL', description: 'Enter visual mode' },
 
+  // NORMAL mode — jump
+  { keys: 'gg', action: 'list-top', mode: 'NORMAL', description: 'Jump to top of list' },
+  { keys: 'G', action: 'list-bottom', mode: 'NORMAL', description: 'Jump to bottom of list' },
+
   // NORMAL mode — goto (multi-key)
   { keys: 'gi', action: 'goto-inbox', mode: 'NORMAL', description: 'Go to inbox' },
   { keys: 'gs', action: 'goto-sent', mode: 'NORMAL', description: 'Go to sent' },

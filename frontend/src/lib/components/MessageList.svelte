@@ -71,6 +71,15 @@
       selectedIndex.update((i) => Math.max(i - 1, 0));
     });
 
+    registerHandler('list-top', () => {
+      selectedIndex.set(0);
+    });
+
+    registerHandler('list-bottom', () => {
+      const msgs = get(messages);
+      selectedIndex.set(Math.max(msgs.length - 1, 0));
+    });
+
     registerHandler('open-message', () => {
       const msg = get(selectedMessage);
       if (msg?.thread_id) {
