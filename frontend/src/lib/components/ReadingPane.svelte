@@ -170,6 +170,13 @@
                       sandbox="allow-same-origin"
                       title="Email content"
                       class="html-frame"
+                      on:load={(e) => {
+                        const iframe = e.currentTarget;
+                        const doc = iframe.contentDocument;
+                        if (doc) {
+                          iframe.style.height = doc.documentElement.scrollHeight + 'px';
+                        }
+                      }}
                     ></iframe>
                   {:else}
                     <pre class="body-text">{msg.body_text || '(no content)'}</pre>
@@ -187,6 +194,13 @@
               sandbox="allow-same-origin"
               title="Email content"
               class="html-frame"
+              on:load={(e) => {
+                const iframe = e.currentTarget;
+                const doc = iframe.contentDocument;
+                if (doc) {
+                  iframe.style.height = doc.documentElement.scrollHeight + 'px';
+                }
+              }}
             ></iframe>
           {:else}
             <pre class="body-text">{currentMessage.body_text || '(no content)'}</pre>
@@ -370,7 +384,7 @@
 
   .html-frame {
     width: 100%;
-    min-height: 400px;
+    min-height: 100px;
     border: none;
     background: white;
     border-radius: 4px;
