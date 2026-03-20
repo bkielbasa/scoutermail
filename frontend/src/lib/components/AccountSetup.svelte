@@ -23,16 +23,14 @@
     error = '';
     success = '';
     try {
-      const defaults = await invoke<{
-        imap_host: string;
-        imap_port: number;
-        smtp_host: string;
-        smtp_port: number;
-      }>('get_provider_defaults', { provider });
-      imapHost = defaults.imap_host;
-      imapPort = defaults.imap_port;
-      smtpHost = defaults.smtp_host;
-      smtpPort = defaults.smtp_port;
+      // Returns [imap_host, imap_port, smtp_host, smtp_port] or null
+      const defaults = await invoke<[string, number, string, number] | null>('get_provider_defaults', { provider });
+      if (defaults) {
+        imapHost = defaults[0];
+        imapPort = defaults[1];
+        smtpHost = defaults[2];
+        smtpPort = defaults[3];
+      }
     } catch (err: unknown) {
       error = err instanceof Error ? err.message : String(err);
     }
@@ -62,16 +60,8 @@
     success = '';
     saving = true;
     try {
-      const account = await invoke<{
-        id: string;
-        name: string;
-        email: string;
-        imap_host: string;
-        imap_port: number;
-        smtp_host: string;
-        smtp_port: number;
-        username: string;
-      }>('add_account', {
+      // add_account returns just the account ID string
+      const id = await invoke<string>('add_account', {
         req: {
           name,
           email,
@@ -83,6 +73,20 @@
           username: username || email,
         },
       });
+
+      // Set active account on the Rust side
+      await invoke('set_active_account', { id });
+
+      const account = {
+        id,
+        name,
+        email,
+        imap_host: imapHost,
+        imap_port: imapPort,
+        smtp_host: smtpHost,
+        smtp_port: smtpPort,
+        username: username || email,
+      };
       accounts.update((list) => [...list, account]);
       activeAccount.set(account);
       dispatch('done');

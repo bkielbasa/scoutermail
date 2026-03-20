@@ -42,6 +42,7 @@
       if (accountList.length > 0) {
         hasAccounts = true;
         activeAccount.set(accountList[0]);
+        await invoke('set_active_account', { id: accountList[0].id });
         try {
           await syncFolder('INBOX');
         } catch {
