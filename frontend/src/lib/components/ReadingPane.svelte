@@ -11,7 +11,7 @@
   let currentMessage: Message | null = null;
   let thread: Message[] = [];
   let currentFocus: string = 'list';
-  let showHtml = false;
+  let showHtml = true;
   let showHeaders = false;
   let expandedUids: Set<number> = new Set();
 
@@ -167,7 +167,7 @@
                   {#if showHtml && msg.body_html}
                     <iframe
                       srcdoc={msg.body_html}
-                      sandbox=""
+                      sandbox="allow-same-origin"
                       title="Email content"
                       class="html-frame"
                     ></iframe>
@@ -184,7 +184,7 @@
           {#if showHtml && currentMessage.body_html}
             <iframe
               srcdoc={currentMessage.body_html}
-              sandbox=""
+              sandbox="allow-same-origin"
               title="Email content"
               class="html-frame"
             ></iframe>
