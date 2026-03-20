@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::accounts::manager::{AccountConfig, AccountManager};
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{Database, Folder, Message};
+use crate::store::db::{Contact, Database, Folder, Message};
 use crate::store::search::SearchIndex;
 
 // ---------------------------------------------------------------------------
@@ -349,4 +349,27 @@ pub async fn delete_message(
     let db = open_db(&state).await?;
     db.delete_message(uid, &folder).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn search_contacts(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<Contact>, String> {
+    let db = open_db(&state).await?;
+    db.search_contacts(&query, limit.unwrap_or(10))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_all_contacts(
+    state: State<'_, AppState>,
+) -> Result<Vec<Contact>, String> {
+    let db = open_db(&state).await?;
+    db.get_all_contacts().map_err(|e| e.to_string())
 }

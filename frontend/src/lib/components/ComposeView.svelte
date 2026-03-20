@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import AddressInput from './AddressInput.svelte';
   import { selectedMessage, type Message } from '$lib/stores/messages';
   import { mode } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
@@ -162,10 +163,8 @@
   <div class="compose-fields">
     <div class="field-row">
       <label class="field-label" for="compose-to">To</label>
-      <input
+      <AddressInput
         id="compose-to"
-        class="field-input"
-        type="text"
         bind:value={to}
         placeholder="recipient@example.com"
         disabled={sending}
@@ -175,10 +174,8 @@
     {#if showCc}
       <div class="field-row">
         <label class="field-label" for="compose-cc">Cc</label>
-        <input
+        <AddressInput
           id="compose-cc"
-          class="field-input"
-          type="text"
           bind:value={cc}
           placeholder="cc@example.com"
           disabled={sending}
@@ -189,10 +186,8 @@
     {#if showBcc}
       <div class="field-row">
         <label class="field-label" for="compose-bcc">Bcc</label>
-        <input
+        <AddressInput
           id="compose-bcc"
-          class="field-input"
-          type="text"
           bind:value={bcc}
           placeholder="bcc@example.com"
           disabled={sending}

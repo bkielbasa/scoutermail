@@ -374,6 +374,38 @@ impl Database {
     // Contact CRUD
     // -----------------------------------------------------------------------
 
+    pub fn search_contacts(&self, query: &str, limit: usize) -> Result<Vec<Contact>, StoreError> {
+        let pattern = format!("%{}%", query);
+        let mut stmt = self.conn.prepare(
+            "SELECT email, name, frequency FROM contacts
+             WHERE email LIKE ?1 OR name LIKE ?1
+             ORDER BY frequency DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit as i64], |row| {
+            Ok(Contact {
+                email: row.get(0)?,
+                name: row.get(1)?,
+                frequency: row.get(2)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn get_all_contacts(&self) -> Result<Vec<Contact>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT email, name, frequency FROM contacts ORDER BY frequency DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Contact {
+                email: row.get(0)?,
+                name: row.get(1)?,
+                frequency: row.get(2)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     pub fn upsert_contact(&self, email: &str, name: Option<&str>) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO contacts (email, name, frequency)

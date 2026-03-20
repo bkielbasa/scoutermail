@@ -47,6 +47,8 @@ pub fn run() {
             commands::send_email,
             commands::update_flags,
             commands::delete_message,
+            commands::search_contacts,
+            commands::get_all_contacts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
