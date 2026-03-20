@@ -1,3 +1,5 @@
+use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
+use mailparse::dateparse;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -60,6 +62,36 @@ pub struct Contact {
 }
 
 // ---------------------------------------------------------------------------
+// Date parsing
+// ---------------------------------------------------------------------------
+
+/// Parse an email date string into a unix epoch timestamp for sorting.
+/// Handles RFC 2822, RFC 3339, and common variants.
+fn parse_date_to_epoch(date: Option<&str>) -> i64 {
+    let date = match date {
+        Some(d) if !d.is_empty() => d,
+        _ => return 0,
+    };
+
+    // Try mailparse's dateparse first (handles RFC 2822 / email dates)
+    if let Ok(epoch) = dateparse(date) {
+        return epoch;
+    }
+
+    // Try RFC 3339 / ISO 8601 (from INTERNALDATE)
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date) {
+        return dt.timestamp();
+    }
+
+    // Try RFC 2822 via chrono
+    if let Ok(dt) = DateTime::parse_from_rfc2822(date) {
+        return dt.timestamp();
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -100,6 +132,7 @@ impl Database {
                 to_addr      TEXT,
                 cc           TEXT,
                 date         TEXT,
+                date_epoch   INTEGER NOT NULL DEFAULT 0,
                 body_text    TEXT,
                 body_html    TEXT,
                 flags        TEXT,
@@ -149,9 +182,23 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_messages_folder    ON messages(folder);
             CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
-            CREATE INDEX IF NOT EXISTS idx_messages_date      ON messages(date);
+            CREATE INDEX IF NOT EXISTS idx_messages_date      ON messages(date_epoch DESC);
             ",
         )?;
+
+        // Migration: add date_epoch column if missing (existing databases)
+        let has_date_epoch: bool = self.conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='date_epoch'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        if !has_date_epoch {
+            self.conn.execute_batch(
+                "ALTER TABLE messages ADD COLUMN date_epoch INTEGER NOT NULL DEFAULT 0;"
+            )?;
+        }
+
         Ok(())
     }
 
@@ -160,11 +207,12 @@ impl Database {
     // -----------------------------------------------------------------------
 
     pub fn upsert_message(&self, msg: &Message) -> Result<(), StoreError> {
+        let epoch = parse_date_to_epoch(msg.date.as_deref());
         self.conn.execute(
             "INSERT INTO messages
                 (uid, folder, message_id, subject, from_addr, to_addr, cc,
-                 date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+                 date, date_epoch, body_text, body_html, flags, thread_id, ref_headers, in_reply_to)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
              ON CONFLICT(uid, folder) DO UPDATE SET
                 message_id  = excluded.message_id,
                 subject     = excluded.subject,
@@ -172,6 +220,7 @@ impl Database {
                 to_addr     = excluded.to_addr,
                 cc          = excluded.cc,
                 date        = excluded.date,
+                date_epoch  = excluded.date_epoch,
                 body_text   = excluded.body_text,
                 body_html   = excluded.body_html,
                 flags       = excluded.flags,
@@ -187,6 +236,7 @@ impl Database {
                 msg.to_addr,
                 msg.cc,
                 msg.date,
+                epoch,
                 msg.body_text,
                 msg.body_html,
                 msg.flags,
@@ -234,7 +284,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
                     date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to
-             FROM messages WHERE folder = ?1 ORDER BY date DESC",
+             FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC",
         )?;
         let rows = stmt.query_map(params![folder], |row| {
             Ok(Message {
