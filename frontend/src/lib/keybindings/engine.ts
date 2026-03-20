@@ -126,6 +126,10 @@ function handleNormalOrVisualMode(event: KeyboardEvent): void {
   if (event.metaKey || event.altKey) return;
   if (event.ctrlKey && event.key !== 'Enter') return;
 
+  // Let input/textarea/select elements handle their own keystrokes
+  const tag = (event.target as HTMLElement)?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
   event.preventDefault();
 
   const key = keyName(event);
