@@ -7,6 +7,22 @@
   } from '$lib/stores/messages';
   import { focusPane } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
+  import { open } from '@tauri-apps/plugin-shell';
+
+  function setupIframe(iframe: HTMLIFrameElement): void {
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    // Auto-resize to content height
+    iframe.style.height = doc.documentElement.scrollHeight + 'px';
+    // Intercept all link clicks and open in default browser
+    doc.addEventListener('click', (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a');
+      if (anchor?.href && anchor.href !== '#' && !anchor.href.startsWith('about:')) {
+        e.preventDefault();
+        open(anchor.href);
+      }
+    });
+  }
 
   let currentMessage: Message | null = null;
   let thread: Message[] = [];
@@ -170,13 +186,7 @@
                       sandbox="allow-same-origin"
                       title="Email content"
                       class="html-frame"
-                      on:load={(e) => {
-                        const iframe = e.currentTarget;
-                        const doc = iframe.contentDocument;
-                        if (doc) {
-                          iframe.style.height = doc.documentElement.scrollHeight + 'px';
-                        }
-                      }}
+                      on:load={(e) => setupIframe(e.currentTarget)}
                     ></iframe>
                   {:else}
                     <pre class="body-text">{msg.body_text || '(no content)'}</pre>
