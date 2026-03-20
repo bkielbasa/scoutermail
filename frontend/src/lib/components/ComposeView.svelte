@@ -126,7 +126,7 @@
           body_text: body,
           body_html: null,
           in_reply_to: inReplyTo,
-          references,
+          references: references ? references.split(/\s+/).filter(Boolean) : [],
         },
       });
       handleClose();
