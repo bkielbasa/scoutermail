@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
   import StatusBar from '$lib/components/StatusBar.svelte';
   import HintBar from '$lib/components/HintBar.svelte';
@@ -13,7 +14,7 @@
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen } from '$lib/stores/ui';
   import { accounts, activeAccount, activeFolder, type Account } from '$lib/stores/accounts';
-  import { syncFolder, loadMessages } from '$lib/stores/messages';
+  import { syncFolder, loadMessages, selectedMessage } from '$lib/stores/messages';
 
   let composing = false;
   let composeMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
@@ -67,9 +68,74 @@
     registerHandler('goto-drafts', () => navigateToFolder('Drafts'));
     registerHandler('goto-archive', () => navigateToFolder('Archive'));
 
+    // Archive: delete from current folder (simplified for v1)
+    registerHandler('archive', async () => {
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      await loadMessages(get(activeFolder));
+    });
+
+    // Delete: same as archive for v1
+    registerHandler('delete', async () => {
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      await loadMessages(get(activeFolder));
+    });
+
+    // Star/flag toggle
+    registerHandler('star', async () => {
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      const currentFlags = msg.flags ?? '';
+      const newFlags = currentFlags.includes('Flagged')
+        ? currentFlags.replace('Flagged', '').trim()
+        : `${currentFlags} Flagged`.trim();
+      await invoke('update_flags', { uid: msg.uid, folder: msg.folder, flags: newFlags });
+      await loadMessages(get(activeFolder));
+    });
+
+    // Mark unread
+    registerHandler('mark-unread', async () => {
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      const currentFlags = msg.flags ?? '';
+      const newFlags = currentFlags.replace('Seen', '').trim();
+      await invoke('update_flags', { uid: msg.uid, folder: msg.folder, flags: newFlags });
+      await loadMessages(get(activeFolder));
+    });
+
+    // Account switching (1-9)
+    for (let i = 1; i <= 9; i++) {
+      registerHandler(`switch-account-${i}`, async () => {
+        const accts = get(accounts);
+        if (i <= accts.length) {
+          activeAccount.set(accts[i - 1]);
+          await invoke('set_active_account', { id: accts[i - 1].id });
+          activeFolder.set('INBOX');
+          await syncFolder('INBOX');
+        }
+      });
+    }
+
     initAccounts();
 
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    // Background sync every 5 minutes
+    const syncInterval = setInterval(async () => {
+      if (hasAccounts) {
+        try {
+          await syncFolder(get(activeFolder));
+        } catch (e) {
+          console.error('Background sync failed:', e);
+        }
+      }
+    }, 5 * 60 * 1000);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearInterval(syncInterval);
+    };
   });
 
   async function handleSetupDone(): Promise<void> {
