@@ -1,5 +1,10 @@
 import { writable, derived } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification';
 
 export interface Message {
   uid: number;
@@ -38,6 +43,37 @@ export async function loadThreadMessages(threadId: string): Promise<void> {
 }
 
 export async function syncFolder(folder: string): Promise<void> {
-  await invoke('sync_folder', { folder });
+  const newMessages = await invoke<Message[]>('sync_folder', { folder });
   await loadMessages(folder);
+
+  if (newMessages.length > 0) {
+    notifyNewMail(newMessages);
+  }
+}
+
+async function notifyNewMail(newMessages: Message[]): Promise<void> {
+  try {
+    let permitted = await isPermissionGranted();
+    if (!permitted) {
+      const result = await requestPermission();
+      permitted = result === 'granted';
+    }
+    if (!permitted) return;
+
+    if (newMessages.length === 1) {
+      const msg = newMessages[0];
+      const from = msg.from_addr?.replace(/<.*>/, '').trim() || 'Unknown';
+      sendNotification({
+        title: from,
+        body: msg.subject || '(no subject)',
+      });
+    } else {
+      sendNotification({
+        title: 'ScouterMail',
+        body: `${newMessages.length} new messages`,
+      });
+    }
+  } catch {
+    // Notification errors are non-critical
+  }
 }
