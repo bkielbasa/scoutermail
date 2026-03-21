@@ -20,6 +20,8 @@ pub fn run() {
 
     std::fs::create_dir_all(&data_dir).expect("failed to create data directory");
 
+    accounts::keychain::init(&data_dir);
+
     let account_manager =
         AccountManager::new(data_dir).expect("failed to initialise AccountManager");
 
