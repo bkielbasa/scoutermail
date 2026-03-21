@@ -55,6 +55,7 @@ pub fn run() {
             commands::get_events_for_message,
             commands::respond_to_invite,
             commands::get_folder_counts,
+            commands::move_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

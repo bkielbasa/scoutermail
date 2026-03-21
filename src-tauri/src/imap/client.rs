@@ -81,6 +81,26 @@ pub async fn connect(config: &ImapConfig) -> Result<ImapSession, ImapError> {
     Ok(session)
 }
 
+/// Move a message from one folder to another by UID.
+/// Tries the IMAP MOVE command (RFC 6851) first, falling back to COPY+DELETE+EXPUNGE.
+pub async fn move_message(session: &mut ImapSession, uid: u32, from: &str, to: &str) -> Result<(), ImapError> {
+    session.select(from).await?;
+    let uid_str = uid.to_string();
+    match session.uid_mv(&uid_str, to).await {
+        Ok(_) => Ok(()),
+        Err(_) => {
+            // Fallback: COPY then mark \Deleted then EXPUNGE
+            session.uid_copy(&uid_str, to).await?;
+            let store_stream = session.uid_store(&uid_str, "+FLAGS (\\Deleted)").await?;
+            // Consume the stream to complete the command
+            let _: Vec<_> = store_stream.collect::<Vec<_>>().await;
+            let expunge_stream = session.expunge().await?;
+            let _: Vec<_> = expunge_stream.collect::<Vec<_>>().await;
+            Ok(())
+        }
+    }
+}
+
 /// List all folders (mailboxes) on the server.
 pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<String>, ImapError> {
     let names_stream = session.list(Some(""), Some("*")).await?;

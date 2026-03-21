@@ -3,7 +3,7 @@ import { mode, commandInput, searchOpen, helpOpen } from '$lib/stores/ui';
 import type { Mode } from '$lib/stores/ui';
 
 export type Action = string;
-export type KeyHandler = () => void;
+export type KeyHandler = (args?: string) => void;
 
 export interface Binding {
   keys: string;
@@ -43,10 +43,10 @@ function resetBufferTimeout(): void {
   }, 500);
 }
 
-function execute(action: Action): void {
+function execute(action: Action, args?: string): void {
   const handler = handlers.get(action);
   if (handler) {
-    handler();
+    handler(args);
   }
 }
 
@@ -54,7 +54,8 @@ export function executeCommand(cmd: string): void {
   const parts = cmd.trim().split(/\s+/);
   if (parts.length === 0 || parts[0] === '') return;
   const action = `cmd:${parts[0]}`;
-  execute(action);
+  const args = parts.slice(1).join(' ');
+  execute(action, args || undefined);
 }
 
 function keyName(event: KeyboardEvent): string {

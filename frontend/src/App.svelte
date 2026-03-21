@@ -125,6 +125,16 @@
       showFolders = false;
     });
 
+    // :move command — move message to another IMAP folder
+    registerHandler('cmd:move', async (args?: string) => {
+      if (!args) return;
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: args.trim() });
+      await loadMessages(get(activeFolder));
+      await refreshFolderCounts();
+    });
+
     // Archive: delete from current folder (simplified for v1)
     registerHandler('archive', async () => {
       const msg = get(selectedMessage);

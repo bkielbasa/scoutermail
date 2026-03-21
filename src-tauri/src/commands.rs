@@ -365,6 +365,49 @@ pub async fn delete_message(
 }
 
 // ---------------------------------------------------------------------------
+// Move
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn move_message(
+    state: State<'_, AppState>,
+    uid: u32,
+    from_folder: String,
+    to_folder: String,
+) -> Result<(), String> {
+    let id = get_active_id(&state).await?;
+    let imap_config = {
+        let mgr = state.account_manager.lock().await;
+        mgr.get_imap_config(&id).map_err(|e| e.to_string())?
+    };
+
+    // Move on IMAP server (uses spawn_blocking like sync_folder to avoid Send issues)
+    let from = from_folder.clone();
+    let to = to_folder.clone();
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        handle.block_on(async move {
+            let mut session = imap_client::connect(&imap_config)
+                .await
+                .map_err(|e| e.to_string())?;
+            imap_client::move_message(&mut session, uid, &from, &to)
+                .await
+                .map_err(|e| e.to_string())?;
+            let _ = session.logout().await;
+            Ok::<(), String>(())
+        })
+    })
+    .await
+    .map_err(|e| format!("move task panicked: {}", e))??;
+
+    // Update local DB: delete from old folder (message will appear in new folder on next sync)
+    let db = open_db(&state).await?;
+    db.delete_message(uid, &from_folder).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Contacts
 // ---------------------------------------------------------------------------
 
