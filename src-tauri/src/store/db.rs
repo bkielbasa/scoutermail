@@ -436,6 +436,32 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_unread_count(&self, folder: &str) -> Result<i64, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE folder = ?1 AND flags NOT LIKE '%Seen%'",
+                params![folder],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Db)
+    }
+
+    pub fn get_folder_counts(&self) -> Result<Vec<(String, i64, i64)>, StoreError> {
+        // Returns (folder_name, total_count, unread_count)
+        let mut stmt = self.conn.prepare(
+            "SELECT folder, COUNT(*), SUM(CASE WHEN flags NOT LIKE '%Seen%' THEN 1 ELSE 0 END)
+             FROM messages GROUP BY folder ORDER BY folder",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     pub fn get_folders(&self) -> Result<Vec<Folder>, StoreError> {
         let mut stmt = self
             .conn

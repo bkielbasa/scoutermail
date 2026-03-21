@@ -143,6 +143,18 @@ pub async fn get_provider_defaults(
 }
 
 // ---------------------------------------------------------------------------
+// Folder counts
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_folder_counts(
+    state: State<'_, AppState>,
+) -> Result<Vec<(String, i64, i64)>, String> {
+    let db = open_db(&state).await?;
+    db.get_folder_counts().map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Connection test
 // ---------------------------------------------------------------------------
 

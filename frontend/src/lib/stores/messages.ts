@@ -5,6 +5,7 @@ import {
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
+import { unreadCount, folderCounts } from '$lib/stores/accounts';
 
 export interface Message {
   uid: number;
@@ -35,6 +36,19 @@ export async function loadMessages(folder: string): Promise<void> {
   const result = await invoke<Message[]>('get_messages', { folder });
   messages.set(result);
   selectedIndex.set(0);
+
+  // Compute unread count for current folder
+  const unread = result.filter((m) => !m.flags?.includes('Seen')).length;
+  unreadCount.set(unread);
+}
+
+export async function refreshFolderCounts(): Promise<void> {
+  try {
+    const counts = await invoke<Array<[string, number, number]>>('get_folder_counts');
+    folderCounts.set(counts);
+  } catch {
+    // Non-critical
+  }
 }
 
 export async function loadThreadMessages(threadId: string): Promise<void> {

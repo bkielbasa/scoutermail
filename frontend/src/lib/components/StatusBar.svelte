@@ -1,6 +1,6 @@
 <script lang="ts">
   import { mode } from '$lib/stores/ui';
-  import { activeAccount, activeFolder } from '$lib/stores/accounts';
+  import { activeAccount, activeFolder, unreadCount } from '$lib/stores/accounts';
 
   const modeColors: Record<string, string> = {
     NORMAL: 'var(--text-dim)',
@@ -12,15 +12,17 @@
   let currentMode = $state('NORMAL');
   let account = $state<{ name: string; email: string } | null>(null);
   let folder = $state('INBOX');
+  let unread = $state(0);
 
   mode.subscribe((v) => (currentMode = v));
   activeAccount.subscribe((v) => (account = v));
   activeFolder.subscribe((v) => (folder = v));
+  unreadCount.subscribe((v) => (unread = v));
 </script>
 
 <div class="status-bar">
   <span class="left">
-    {account ? account.name : 'no account'}:{folder}
+    {account ? account.name : 'no account'}:{folder}{#if unread > 0}({unread}){/if}
   </span>
   <span class="center" style="color: {modeColors[currentMode]}">
     {currentMode}

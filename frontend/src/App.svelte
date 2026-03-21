@@ -12,16 +12,18 @@
   import HelpOverlay from '$lib/components/HelpOverlay.svelte';
   import ContactsList from '$lib/components/ContactsList.svelte';
   import CalendarView from '$lib/components/CalendarView.svelte';
+  import FolderList from '$lib/components/FolderList.svelte';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen } from '$lib/stores/ui';
   import { accounts, activeAccount, activeFolder, type Account } from '$lib/stores/accounts';
-  import { syncFolder, loadMessages, selectedMessage } from '$lib/stores/messages';
+  import { syncFolder, loadMessages, selectedMessage, refreshFolderCounts } from '$lib/stores/messages';
 
   let composing = false;
   let composeMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
   let showContacts = false;
   let showCalendar = false;
+  let showFolders = false;
   let hasAccounts = false;
   let isSearchOpen = false;
   let isHelpOpen = false;
@@ -63,6 +65,7 @@
     activeFolder.set(folder);
     showContacts = false;
     showCalendar = false;
+    showFolders = false;
     await loadMessages(folder);
   }
 
@@ -80,6 +83,7 @@
           // Sync may fail if offline; messages may still be cached
           await loadMessages('INBOX');
         }
+        await refreshFolderCounts();
       }
     } catch {
       // No accounts yet
@@ -100,11 +104,17 @@
     registerHandler('goto-drafts', () => navigateToFolder('Drafts'));
     registerHandler('goto-archive', () => navigateToFolder('Archive'));
 
+    // :folders command
+    registerHandler('cmd:folders', () => {
+      showFolders = !showFolders;
+    });
+
     // :contacts command
     registerHandler('cmd:contacts', () => {
       composing = false;
       showContacts = true;
       showCalendar = false;
+      showFolders = false;
     });
 
     // :calendar command
@@ -112,6 +122,7 @@
       showCalendar = true;
       composing = false;
       showContacts = false;
+      showFolders = false;
     });
 
     // Archive: delete from current folder (simplified for v1)
@@ -172,6 +183,7 @@
       if (hasAccounts) {
         try {
           await syncFolder(get(activeFolder));
+          await refreshFolderCounts();
         } catch (e) {
           console.error('Background sync failed:', e);
         }
@@ -191,6 +203,7 @@
     } catch {
       await loadMessages('INBOX');
     }
+    await refreshFolderCounts();
   }
 </script>
 
@@ -203,6 +216,12 @@
       <SearchBar />
     {/if}
     <main class="content">
+      {#if showFolders}
+        <FolderList
+          activeFolder={get(activeFolder)}
+          on:select={(e) => navigateToFolder(e.detail)}
+        />
+      {/if}
       <div class="message-list-pane" style="width: {listWidth}%">
         <MessageList />
       </div>
@@ -238,6 +257,7 @@
     display: flex;
     flex: 1;
     overflow: hidden;
+    position: relative;
   }
   .message-list-pane {
     min-width: 200px;

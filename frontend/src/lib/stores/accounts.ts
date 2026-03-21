@@ -14,3 +14,5 @@ export interface Account {
 export const accounts = writable<Account[]>([]);
 export const activeAccount = writable<Account | null>(null);
 export const activeFolder = writable<string>('INBOX');
+export const unreadCount = writable<number>(0);
+export const folderCounts = writable<Array<[string, number, number]>>([]);
