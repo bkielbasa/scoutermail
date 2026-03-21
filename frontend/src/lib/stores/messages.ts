@@ -26,6 +26,7 @@ export interface Message {
 
 export const messages = writable<Message[]>([]);
 export const selectedIndex = writable<number>(0);
+export const visualSelection = writable<Set<number>>(new Set());
 export const selectedMessage = derived(
   [messages, selectedIndex],
   ([$messages, $selectedIndex]) => $messages[$selectedIndex] ?? null

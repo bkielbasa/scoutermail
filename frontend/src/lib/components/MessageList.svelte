@@ -7,8 +7,9 @@
     selectedIndex,
     selectedMessage,
     loadThreadMessages,
+    visualSelection,
   } from '$lib/stores/messages';
-  import { focusPane } from '$lib/stores/ui';
+  import { focusPane, mode } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
 
   function formatDate(dateStr: string | null): string {
@@ -108,6 +109,34 @@
     registerHandler('toggle-pane', () => {
       focusPane.update((p) => (p === 'list' ? 'reading' : 'list'));
     });
+
+    registerHandler('enter-visual', () => {
+      mode.set('VISUAL');
+      const idx = get(selectedIndex);
+      visualSelection.set(new Set([idx]));
+    });
+
+    registerHandler('exit-visual', () => {
+      mode.set('NORMAL');
+      visualSelection.set(new Set());
+    });
+
+    registerHandler('visual-extend-down', () => {
+      selectedIndex.update((i) => {
+        const msgs = get(messages);
+        const next = Math.min(i + 1, msgs.length - 1);
+        visualSelection.update((s) => { s.add(next); return new Set(s); });
+        return next;
+      });
+    });
+
+    registerHandler('visual-extend-up', () => {
+      selectedIndex.update((i) => {
+        const prev = Math.max(i - 1, 0);
+        visualSelection.update((s) => { s.add(prev); return new Set(s); });
+        return prev;
+      });
+    });
   });
 
   let messageList: Message[] = [];
@@ -125,10 +154,14 @@
   });
   const unsubFocus = focusPane.subscribe((v) => (currentFocus = v));
 
+  let currentVisualSelection: Set<number> = new Set();
+  const unsubVisual = visualSelection.subscribe((v) => (currentVisualSelection = v));
+
   onDestroy(() => {
     unsubMessages();
     unsubIndex();
     unsubFocus();
+    unsubVisual();
   });
 </script>
 
@@ -141,6 +174,7 @@
         class="message-item"
         class:selected={i === currentIndex}
         class:unread={isUnread(msg.flags)}
+        class:visual-selected={currentVisualSelection.has(i)}
         on:click={() => selectAndLoadThread(i)}
         type="button"
       >
@@ -189,6 +223,11 @@
   .message-item.selected {
     border-left-color: var(--accent);
     background: var(--accent-dim);
+  }
+
+  .message-item.visual-selected {
+    background: var(--accent-dim);
+    border-left-color: var(--accent);
   }
 
   .message-item.unread .sender,

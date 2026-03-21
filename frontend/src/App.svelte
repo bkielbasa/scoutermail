@@ -16,9 +16,9 @@
   import SignatureEditor from '$lib/components/SignatureEditor.svelte';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
-  import { searchOpen, helpOpen } from '$lib/stores/ui';
+  import { searchOpen, helpOpen, mode } from '$lib/stores/ui';
   import { accounts, activeAccount, activeFolder, type Account } from '$lib/stores/accounts';
-  import { syncFolder, loadMessages, selectedMessage, refreshFolderCounts } from '$lib/stores/messages';
+  import { syncFolder, loadMessages, selectedMessage, messages, visualSelection, refreshFolderCounts } from '$lib/stores/messages';
 
   let composing = false;
   let composeMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
@@ -155,6 +155,32 @@
       const msg = get(selectedMessage);
       if (!msg) return;
       await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      await loadMessages(get(activeFolder));
+    });
+
+    // Visual mode bulk archive
+    registerHandler('visual-archive', async () => {
+      const sel = get(visualSelection);
+      const msgs = get(messages);
+      for (const idx of sel) {
+        const msg = msgs[idx];
+        if (msg) await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      }
+      mode.set('NORMAL');
+      visualSelection.set(new Set());
+      await loadMessages(get(activeFolder));
+    });
+
+    // Visual mode bulk delete
+    registerHandler('visual-delete', async () => {
+      const sel = get(visualSelection);
+      const msgs = get(messages);
+      for (const idx of sel) {
+        const msg = msgs[idx];
+        if (msg) await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      }
+      mode.set('NORMAL');
+      visualSelection.set(new Set());
       await loadMessages(get(activeFolder));
     });
 
