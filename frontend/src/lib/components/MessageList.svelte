@@ -4,6 +4,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import {
     messages,
+    filteredMessages,
     selectedIndex,
     selectedMessage,
     loadThreadMessages,
@@ -57,7 +58,7 @@
 
   function selectAndLoadThread(index: number): void {
     selectedIndex.set(index);
-    const msg = get(messages)[index];
+    const msg = get(filteredMessages)[index];
     if (msg?.thread_id) {
       loadThreadMessages(msg.thread_id);
     }
@@ -65,7 +66,7 @@
 
   onMount(() => {
     registerHandler('list-down', () => {
-      const msgs = get(messages);
+      const msgs = get(filteredMessages);
       selectedIndex.update((i) => Math.min(i + 1, msgs.length - 1));
     });
 
@@ -78,7 +79,7 @@
     });
 
     registerHandler('list-bottom', () => {
-      const msgs = get(messages);
+      const msgs = get(filteredMessages);
       selectedIndex.set(Math.max(msgs.length - 1, 0));
     });
 
@@ -123,7 +124,7 @@
 
     registerHandler('visual-extend-down', () => {
       selectedIndex.update((i) => {
-        const msgs = get(messages);
+        const msgs = get(filteredMessages);
         const next = Math.min(i + 1, msgs.length - 1);
         visualSelection.update((s) => { s.add(next); return new Set(s); });
         return next;
@@ -143,7 +144,7 @@
   let currentIndex = 0;
   let currentFocus: string = 'list';
 
-  const unsubMessages = messages.subscribe((v) => (messageList = v));
+  const unsubMessages = filteredMessages.subscribe((v) => (messageList = v));
   const unsubIndex = selectedIndex.subscribe((v) => {
     currentIndex = v;
     // Scroll selected item into view

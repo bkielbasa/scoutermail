@@ -9,7 +9,7 @@ use crate::accounts::manager::{AccountConfig, AccountManager};
 use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Message, StoredEvent};
+use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Label, Message, StoredEvent};
 use crate::store::search::SearchIndex;
 
 use serde::Serialize;
@@ -777,4 +777,79 @@ pub async fn save_attachment(
     let path = downloads.join(&target_name);
     std::fs::write(&path, &data).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Label commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn create_label(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<i64, String> {
+    let db = open_db(&state).await?;
+    db.create_label(&name, "").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_labels(
+    state: State<'_, AppState>,
+) -> Result<Vec<Label>, String> {
+    let db = open_db(&state).await?;
+    db.get_labels().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_label(
+    state: State<'_, AppState>,
+    label_id: i64,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.delete_label(label_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn label_message(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+    label_id: i64,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.add_label_to_message(uid, &folder, label_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn unlabel_message(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+    label_id: i64,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.remove_label_from_message(uid, &folder, label_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_message_labels(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+) -> Result<Vec<Label>, String> {
+    let db = open_db(&state).await?;
+    db.get_labels_for_message(uid, &folder)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_messages_by_label(
+    state: State<'_, AppState>,
+    label_id: i64,
+) -> Result<Vec<Message>, String> {
+    let db = open_db(&state).await?;
+    db.get_messages_by_label(label_id)
+        .map_err(|e| e.to_string())
 }

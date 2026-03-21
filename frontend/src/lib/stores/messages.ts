@@ -31,9 +31,27 @@ export interface Message {
 export const messages = writable<Message[]>([]);
 export const selectedIndex = writable<number>(0);
 export const visualSelection = writable<Set<number>>(new Set());
+
+export type FilterType = 'all' | 'unread' | 'starred';
+export const activeFilter = writable<FilterType>('all');
+
+export const filteredMessages = derived(
+  [messages, activeFilter],
+  ([$messages, $filter]) => {
+    switch ($filter) {
+      case 'unread':
+        return $messages.filter((m) => !m.flags?.includes('Seen'));
+      case 'starred':
+        return $messages.filter((m) => m.flags?.includes('Flagged'));
+      default:
+        return $messages;
+    }
+  }
+);
+
 export const selectedMessage = derived(
-  [messages, selectedIndex],
-  ([$messages, $selectedIndex]) => $messages[$selectedIndex] ?? null
+  [filteredMessages, selectedIndex],
+  ([$filtered, $idx]) => $filtered[$idx] ?? null
 );
 export const threadMessages = writable<Message[]>([]);
 

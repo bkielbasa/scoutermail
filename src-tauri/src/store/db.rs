@@ -89,6 +89,12 @@ pub struct AttachmentInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Label {
+    pub label_id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Draft {
     pub draft_id: Option<i64>,
     pub to_addr: String,
@@ -1025,6 +1031,118 @@ impl Database {
             params![uid, folder],
         )?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Label CRUD
+    // -----------------------------------------------------------------------
+
+    pub fn create_label(&self, name: &str, _color: &str) -> Result<i64, StoreError> {
+        self.conn.execute(
+            "INSERT INTO labels (name) VALUES (?1)",
+            params![name],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_labels(&self) -> Result<Vec<Label>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT label_id, name FROM labels ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Label {
+                label_id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?;
+        let mut labels = Vec::new();
+        for row in rows {
+            labels.push(row?);
+        }
+        Ok(labels)
+    }
+
+    pub fn delete_label(&self, label_id: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM message_labels WHERE label_id = ?1",
+            params![label_id],
+        )?;
+        self.conn.execute(
+            "DELETE FROM labels WHERE label_id = ?1",
+            params![label_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn add_label_to_message(&self, uid: u32, folder: &str, label_id: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO message_labels (uid, folder, label_id) VALUES (?1, ?2, ?3)",
+            params![uid, folder, label_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_label_from_message(&self, uid: u32, folder: &str, label_id: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM message_labels WHERE uid = ?1 AND folder = ?2 AND label_id = ?3",
+            params![uid, folder, label_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_labels_for_message(&self, uid: u32, folder: &str) -> Result<Vec<Label>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT l.label_id, l.name
+             FROM labels l
+             JOIN message_labels ml ON l.label_id = ml.label_id
+             WHERE ml.uid = ?1 AND ml.folder = ?2
+             ORDER BY l.name",
+        )?;
+        let rows = stmt.query_map(params![uid, folder], |row| {
+            Ok(Label {
+                label_id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?;
+        let mut labels = Vec::new();
+        for row in rows {
+            labels.push(row?);
+        }
+        Ok(labels)
+    }
+
+    pub fn get_messages_by_label(&self, label_id: i64) -> Result<Vec<Message>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.uid, m.message_id, m.folder, m.subject, m.from_addr, m.to_addr, m.cc,
+                    m.date, m.body_text, m.body_html, m.flags, m.thread_id, m.ref_headers, m.in_reply_to
+             FROM messages m
+             JOIN message_labels ml ON m.uid = ml.uid AND m.folder = ml.folder
+             WHERE ml.label_id = ?1
+             ORDER BY m.date_epoch DESC",
+        )?;
+        let rows = stmt.query_map(params![label_id], |row| {
+            Ok(Message {
+                uid: row.get(0)?,
+                message_id: row.get(1)?,
+                folder: row.get(2)?,
+                subject: row.get(3)?,
+                from_addr: row.get(4)?,
+                to_addr: row.get(5)?,
+                cc: row.get(6)?,
+                date: row.get(7)?,
+                body_text: row.get(8)?,
+                body_html: row.get(9)?,
+                flags: row.get(10)?,
+                thread_id: row.get(11)?,
+                ref_headers: row.get(12)?,
+                in_reply_to: row.get(13)?,
+            })
+        })?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
     }
 
     pub fn is_snoozed(&self, uid: u32, folder: &str) -> bool {

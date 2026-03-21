@@ -21,7 +21,7 @@
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen, mode, unifiedMode } from '$lib/stores/ui';
   import { accounts, activeAccount, activeFolder, type Account } from '$lib/stores/accounts';
-  import { syncFolder, loadMessages, loadUnifiedMessages, selectedMessage, messages, visualSelection, refreshFolderCounts } from '$lib/stores/messages';
+  import { syncFolder, loadMessages, loadUnifiedMessages, selectedMessage, messages, filteredMessages, visualSelection, refreshFolderCounts, activeFilter, selectedIndex, type FilterType } from '$lib/stores/messages';
 
   let composing = false;
   let composeMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
@@ -289,6 +289,76 @@
       if (isNaN(minutes)) return;
       await invoke('snooze_message', { uid: msg.uid, folder: msg.folder, durationMinutes: minutes });
       await loadMessages(get(activeFolder));
+    });
+
+    // Label: add a label to the selected message
+    registerHandler('cmd:label', async (args?: string) => {
+      const msg = get(selectedMessage);
+      if (!msg || !args) return;
+      const labelName = args.trim();
+      if (!labelName) return;
+      try {
+        // Check if label already exists
+        const labels = await invoke<Array<{ label_id: number; name: string }>>('get_labels');
+        let label = labels.find((l) => l.name.toLowerCase() === labelName.toLowerCase());
+        if (!label) {
+          const labelId = await invoke<number>('create_label', { name: labelName });
+          label = { label_id: labelId, name: labelName };
+        }
+        await invoke('label_message', { uid: msg.uid, folder: msg.folder, labelId: label.label_id });
+        showToast(`Label "${label.name}" added`, 'info');
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
+    });
+
+    // Unlabel: remove a label from the selected message
+    registerHandler('cmd:unlabel', async (args?: string) => {
+      const msg = get(selectedMessage);
+      if (!msg || !args) return;
+      const labelName = args.trim();
+      if (!labelName) return;
+      try {
+        const labels = await invoke<Array<{ label_id: number; name: string }>>('get_labels');
+        const label = labels.find((l) => l.name.toLowerCase() === labelName.toLowerCase());
+        if (!label) {
+          showToast(`Label "${labelName}" not found`, 'error');
+          return;
+        }
+        await invoke('unlabel_message', { uid: msg.uid, folder: msg.folder, labelId: label.label_id });
+        showToast(`Label "${label.name}" removed`, 'info');
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
+    });
+
+    // Labeled: show messages with a specific label
+    registerHandler('cmd:labeled', async (args?: string) => {
+      if (!args) return;
+      const labelName = args.trim();
+      if (!labelName) return;
+      try {
+        const labels = await invoke<Array<{ label_id: number; name: string }>>('get_labels');
+        const label = labels.find((l) => l.name.toLowerCase() === labelName.toLowerCase());
+        if (!label) {
+          showToast(`Label "${labelName}" not found`, 'error');
+          return;
+        }
+        const result = await invoke<any[]>('get_messages_by_label', { labelId: label.label_id });
+        messages.set(result);
+        selectedIndex.set(0);
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
+    });
+
+    // Quick filter
+    registerHandler('cmd:filter', (args?: string) => {
+      const filter = args?.trim().toLowerCase();
+      if (filter === 'unread') activeFilter.set('unread');
+      else if (filter === 'starred') activeFilter.set('starred');
+      else activeFilter.set('all');
+      selectedIndex.set(0);
     });
 
     // Mark unread

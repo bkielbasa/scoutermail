@@ -27,6 +27,12 @@
     raw_ics: string | null;
   }
 
+  interface Label {
+    label_id: number;
+    name: string;
+  }
+
+  let messageLabels: Label[] = [];
   let messageEvents: StoredEvent[] = [];
 
   function setupIframe(iframe: HTMLIFrameElement): void {
@@ -119,6 +125,7 @@
     currentMessage = msg;
     showHeaders = false;
     messageEvents = [];
+    messageLabels = [];
     // Auto-expand the selected message in thread
     if (msg) {
       expandedUids = new Set([msg.uid]);
@@ -126,6 +133,10 @@
       invoke<StoredEvent[]>('get_events_for_message', { uid: msg.uid, folder: msg.folder })
         .then((evts) => { messageEvents = evts; })
         .catch(() => { messageEvents = []; });
+      // Load labels for this message
+      invoke<Label[]>('get_message_labels', { uid: msg.uid, folder: msg.folder })
+        .then((labels) => { messageLabels = labels; })
+        .catch(() => { messageLabels = []; });
     } else {
       expandedUids = new Set();
     }
@@ -186,6 +197,14 @@
         <span class="meta-sep">&middot;</span>
         <span class="msg-date">{formatDate(currentMessage.date)}</span>
       </div>
+
+      {#if messageLabels.length > 0}
+        <div class="label-chips">
+          {#each messageLabels as label (label.label_id)}
+            <span class="label-chip">{label.name}</span>
+          {/each}
+        </div>
+      {/if}
 
       {#if showHeaders}
         <pre class="raw-headers">{buildRawHeaders(currentMessage)}</pre>
@@ -330,6 +349,23 @@
   .msg-date {
     color: var(--text-dim);
     font-size: 12px;
+  }
+
+  .label-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+
+  .label-chip {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--accent-dim, rgba(99, 102, 241, 0.15));
+    color: var(--accent, #6366f1);
   }
 
   /* Raw headers */
