@@ -26,6 +26,29 @@
   let isSearchOpen = false;
   let isHelpOpen = false;
 
+  let dragging = false;
+  let listWidth = 33;
+
+  function startDrag(e: MouseEvent) {
+    dragging = true;
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const container = document.querySelector('.content') as HTMLElement;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      let pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      pct = Math.max(15, Math.min(50, pct));
+      listWidth = pct;
+    };
+    const onUp = () => {
+      dragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   searchOpen.subscribe((v) => (isSearchOpen = v));
   helpOpen.subscribe((v) => (isHelpOpen = v));
 
@@ -180,9 +203,17 @@
       <SearchBar />
     {/if}
     <main class="content">
-      <div class="message-list-pane">
+      <div class="message-list-pane" style="width: {listWidth}%">
         <MessageList />
       </div>
+      <div
+        class="pane-divider"
+        class:dragging
+        on:mousedown={startDrag}
+        role="separator"
+        aria-orientation="vertical"
+        tabindex="-1"
+      ></div>
       <div class="reading-pane">
         {#if composing}
           <ComposeView replyMode={composeMode} on:close={() => (composing = false)} />
@@ -209,11 +240,21 @@
     overflow: hidden;
   }
   .message-list-pane {
-    width: 33%;
-    min-width: 250px;
-    max-width: 500px;
+    min-width: 200px;
+    max-width: 600px;
     border-right: 1px solid var(--border);
     overflow-y: auto;
+  }
+  .pane-divider {
+    width: 4px;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+  .pane-divider:hover,
+  .pane-divider.dragging {
+    background: var(--accent);
   }
   .reading-pane {
     flex: 1;
