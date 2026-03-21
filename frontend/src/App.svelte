@@ -11,6 +11,7 @@
   import SearchBar from '$lib/components/SearchBar.svelte';
   import HelpOverlay from '$lib/components/HelpOverlay.svelte';
   import ContactsList from '$lib/components/ContactsList.svelte';
+  import CalendarView from '$lib/components/CalendarView.svelte';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen } from '$lib/stores/ui';
@@ -20,6 +21,7 @@
   let composing = false;
   let composeMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
   let showContacts = false;
+  let showCalendar = false;
   let hasAccounts = false;
   let isSearchOpen = false;
   let isHelpOpen = false;
@@ -31,11 +33,13 @@
     composeMode = mode;
     composing = true;
     showContacts = false;
+    showCalendar = false;
   }
 
   async function navigateToFolder(folder: string): Promise<void> {
     activeFolder.set(folder);
     showContacts = false;
+    showCalendar = false;
     await loadMessages(folder);
   }
 
@@ -77,6 +81,14 @@
     registerHandler('cmd:contacts', () => {
       composing = false;
       showContacts = true;
+      showCalendar = false;
+    });
+
+    // :calendar command
+    registerHandler('cmd:calendar', () => {
+      showCalendar = true;
+      composing = false;
+      showContacts = false;
     });
 
     // Archive: delete from current folder (simplified for v1)
@@ -174,6 +186,8 @@
       <div class="reading-pane">
         {#if composing}
           <ComposeView replyMode={composeMode} on:close={() => (composing = false)} />
+        {:else if showCalendar}
+          <CalendarView />
         {:else if showContacts}
           <ContactsList />
         {:else}

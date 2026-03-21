@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import {
     selectedMessage,
     threadMessages,
@@ -8,6 +9,25 @@
   import { focusPane } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
   import { open } from '@tauri-apps/plugin-shell';
+  import InviteCard from './InviteCard.svelte';
+
+  interface StoredEvent {
+    event_uid: string;
+    message_uid: number;
+    folder: string;
+    summary: string | null;
+    dtstart: number;
+    dtend: number | null;
+    location: string | null;
+    description: string | null;
+    organizer: string | null;
+    attendees: string | null;
+    sequence: number;
+    status: string;
+    raw_ics: string | null;
+  }
+
+  let messageEvents: StoredEvent[] = [];
 
   function setupIframe(iframe: HTMLIFrameElement): void {
     const doc = iframe.contentDocument;
@@ -106,9 +126,14 @@
   const unsubMessage = selectedMessage.subscribe((msg) => {
     currentMessage = msg;
     showHeaders = false;
+    messageEvents = [];
     // Auto-expand the selected message in thread
     if (msg) {
       expandedUids = new Set([msg.uid]);
+      // Load calendar events for this message
+      invoke<StoredEvent[]>('get_events_for_message', { uid: msg.uid, folder: msg.folder })
+        .then((evts) => { messageEvents = evts; })
+        .catch(() => { messageEvents = []; });
     } else {
       expandedUids = new Set();
     }
@@ -160,6 +185,10 @@
 
       {#if showHeaders}
         <pre class="raw-headers">{buildRawHeaders(currentMessage)}</pre>
+      {/if}
+
+      {#if messageEvents.length > 0}
+        <InviteCard events={messageEvents} />
       {/if}
 
       {#if thread.length > 1}
