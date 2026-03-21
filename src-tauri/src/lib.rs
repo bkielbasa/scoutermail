@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod calendar;
 pub mod commands;
 pub mod imap;
 pub mod parser;

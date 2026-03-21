@@ -55,6 +55,23 @@ pub struct Folder {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredEvent {
+    pub event_uid: String,
+    pub message_uid: u32,
+    pub folder: String,
+    pub summary: Option<String>,
+    pub dtstart: i64,
+    pub dtend: Option<i64>,
+    pub location: Option<String>,
+    pub description: Option<String>,
+    pub organizer: Option<String>,
+    pub attendees: Option<String>,
+    pub sequence: i32,
+    pub status: String,
+    pub raw_ics: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Contact {
     pub email: String,
     pub name: Option<String>,
@@ -183,6 +200,24 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_messages_folder    ON messages(folder);
             CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
             CREATE INDEX IF NOT EXISTS idx_messages_date      ON messages(date_epoch DESC);
+
+            CREATE TABLE IF NOT EXISTS events (
+                event_uid   TEXT PRIMARY KEY,
+                message_uid INTEGER,
+                folder      TEXT,
+                summary     TEXT,
+                dtstart     INTEGER NOT NULL,
+                dtend       INTEGER,
+                location    TEXT,
+                description TEXT,
+                organizer   TEXT,
+                attendees   TEXT,
+                sequence    INTEGER NOT NULL DEFAULT 0,
+                status      TEXT NOT NULL DEFAULT 'needs-action',
+                raw_ics     TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_events_dtstart ON events(dtstart);
             ",
         )?;
 
@@ -466,6 +501,200 @@ impl Database {
             params![email, name],
         )?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Event CRUD
+    // -----------------------------------------------------------------------
+
+    pub fn upsert_event(
+        &self,
+        event: &crate::calendar::parser::CalendarEvent,
+        message_uid: u32,
+        folder: &str,
+        status: &str,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO events
+                (event_uid, message_uid, folder, summary, dtstart, dtend,
+                 location, description, organizer, attendees, sequence, status, raw_ics)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+             ON CONFLICT(event_uid) DO UPDATE SET
+                message_uid = excluded.message_uid,
+                folder      = excluded.folder,
+                summary     = excluded.summary,
+                dtstart     = excluded.dtstart,
+                dtend       = excluded.dtend,
+                location    = excluded.location,
+                description = excluded.description,
+                organizer   = excluded.organizer,
+                attendees   = excluded.attendees,
+                sequence    = excluded.sequence,
+                status      = excluded.status,
+                raw_ics     = excluded.raw_ics",
+            params![
+                event.event_uid,
+                message_uid,
+                folder,
+                event.summary,
+                event.dtstart,
+                event.dtend,
+                event.location,
+                event.description,
+                event.organizer,
+                event.attendees,
+                event.sequence,
+                status,
+                event.raw_ics,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_events(&self) -> Result<Vec<StoredEvent>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT event_uid, message_uid, folder, summary, dtstart, dtend,
+                    location, description, organizer, attendees, sequence, status, raw_ics
+             FROM events ORDER BY dtstart ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(StoredEvent {
+                event_uid: row.get(0)?,
+                message_uid: row.get(1)?,
+                folder: row.get(2)?,
+                summary: row.get(3)?,
+                dtstart: row.get(4)?,
+                dtend: row.get(5)?,
+                location: row.get(6)?,
+                description: row.get(7)?,
+                organizer: row.get(8)?,
+                attendees: row.get(9)?,
+                sequence: row.get(10)?,
+                status: row.get(11)?,
+                raw_ics: row.get(12)?,
+            })
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
+    pub fn get_events_in_range(
+        &self,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<StoredEvent>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT event_uid, message_uid, folder, summary, dtstart, dtend,
+                    location, description, organizer, attendees, sequence, status, raw_ics
+             FROM events WHERE dtstart >= ?1 AND dtstart <= ?2
+             ORDER BY dtstart ASC",
+        )?;
+        let rows = stmt.query_map(params![start, end], |row| {
+            Ok(StoredEvent {
+                event_uid: row.get(0)?,
+                message_uid: row.get(1)?,
+                folder: row.get(2)?,
+                summary: row.get(3)?,
+                dtstart: row.get(4)?,
+                dtend: row.get(5)?,
+                location: row.get(6)?,
+                description: row.get(7)?,
+                organizer: row.get(8)?,
+                attendees: row.get(9)?,
+                sequence: row.get(10)?,
+                status: row.get(11)?,
+                raw_ics: row.get(12)?,
+            })
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
+    pub fn get_event(&self, event_uid: &str) -> Result<StoredEvent, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT event_uid, message_uid, folder, summary, dtstart, dtend,
+                        location, description, organizer, attendees, sequence, status, raw_ics
+                 FROM events WHERE event_uid = ?1",
+                params![event_uid],
+                |row| {
+                    Ok(StoredEvent {
+                        event_uid: row.get(0)?,
+                        message_uid: row.get(1)?,
+                        folder: row.get(2)?,
+                        summary: row.get(3)?,
+                        dtstart: row.get(4)?,
+                        dtend: row.get(5)?,
+                        location: row.get(6)?,
+                        description: row.get(7)?,
+                        organizer: row.get(8)?,
+                        attendees: row.get(9)?,
+                        sequence: row.get(10)?,
+                        status: row.get(11)?,
+                        raw_ics: row.get(12)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound,
+                other => StoreError::Db(other),
+            })
+    }
+
+    pub fn update_event_status(
+        &self,
+        event_uid: &str,
+        status: &str,
+    ) -> Result<(), StoreError> {
+        let rows = self.conn.execute(
+            "UPDATE events SET status = ?1 WHERE event_uid = ?2",
+            params![status, event_uid],
+        )?;
+        if rows == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn get_events_for_message(
+        &self,
+        message_uid: u32,
+        folder: &str,
+    ) -> Result<Vec<StoredEvent>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT event_uid, message_uid, folder, summary, dtstart, dtend,
+                    location, description, organizer, attendees, sequence, status, raw_ics
+             FROM events WHERE message_uid = ?1 AND folder = ?2
+             ORDER BY dtstart ASC",
+        )?;
+        let rows = stmt.query_map(params![message_uid, folder], |row| {
+            Ok(StoredEvent {
+                event_uid: row.get(0)?,
+                message_uid: row.get(1)?,
+                folder: row.get(2)?,
+                summary: row.get(3)?,
+                dtstart: row.get(4)?,
+                dtend: row.get(5)?,
+                location: row.get(6)?,
+                description: row.get(7)?,
+                organizer: row.get(8)?,
+                attendees: row.get(9)?,
+                sequence: row.get(10)?,
+                status: row.get(11)?,
+                raw_ics: row.get(12)?,
+            })
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
     }
 }
 
