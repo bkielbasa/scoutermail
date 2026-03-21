@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { mode, unifiedMode } from '$lib/stores/ui';
+  import { mode, unifiedMode, loading } from '$lib/stores/ui';
   import { activeAccount, activeFolder, unreadCount } from '$lib/stores/accounts';
 
   const modeColors: Record<string, string> = {
@@ -14,17 +14,19 @@
   let folder = $state('INBOX');
   let unread = $state(0);
   let isUnified = $state(false);
+  let isLoading = $state(false);
 
   mode.subscribe((v) => (currentMode = v));
   activeAccount.subscribe((v) => (account = v));
   activeFolder.subscribe((v) => (folder = v));
   unreadCount.subscribe((v) => (unread = v));
   unifiedMode.subscribe((v) => (isUnified = v));
+  loading.subscribe((v) => (isLoading = v));
 </script>
 
 <div class="status-bar">
   <span class="left">
-    {isUnified ? 'All Accounts' : (account ? account.name : 'no account')}:{folder}{#if unread > 0}({unread}){/if}
+    {isUnified ? 'All Accounts' : (account ? account.name : 'no account')}:{folder}{#if unread > 0}({unread}){/if}{#if isLoading} <span class="syncing">syncing...</span>{/if}
   </span>
   <span class="center" style="color: {modeColors[currentMode]}">
     {currentMode}
@@ -53,5 +55,10 @@
   }
   .right {
     color: var(--text-dim);
+  }
+  .syncing {
+    color: var(--accent);
+    font-style: italic;
+    margin-left: 6px;
   }
 </style>

@@ -6,7 +6,7 @@
     threadMessages,
     type Message,
   } from '$lib/stores/messages';
-  import { focusPane } from '$lib/stores/ui';
+  import { focusPane, readingFontSize } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
   import InviteCard from './InviteCard.svelte';
   import AttachmentList from './AttachmentList.svelte';
@@ -139,9 +139,20 @@
     }
   });
 
+  let fontSize = 13;
+  const unsubFontSize = readingFontSize.subscribe((v) => (fontSize = v));
   const unsubFocus = focusPane.subscribe((v) => (currentFocus = v));
 
   onMount(() => {
+    registerHandler('font-increase', () => {
+      readingFontSize.update((s) => Math.min(s + 1, 24));
+    });
+    registerHandler('font-decrease', () => {
+      readingFontSize.update((s) => Math.max(s - 1, 9));
+    });
+    registerHandler('font-reset', () => {
+      readingFontSize.set(13);
+    });
     registerHandler('toggle-html', () => {
       showHtml = !showHtml;
     });
@@ -155,6 +166,7 @@
     unsubMessage();
     unsubThread();
     unsubFocus();
+    unsubFontSize();
   });
 </script>
 
@@ -212,7 +224,7 @@
                       on:load={(e) => setupIframe(e.currentTarget)}
                     ></iframe>
                   {:else}
-                    <pre class="body-text">{msg.body_text || '(no content)'}</pre>
+                    <pre class="body-text" style="font-size: {fontSize}px">{msg.body_text || '(no content)'}</pre>
                   {/if}
                 </div>
               {/if}
@@ -236,7 +248,7 @@
               }}
             ></iframe>
           {:else}
-            <pre class="body-text">{currentMessage.body_text || '(no content)'}</pre>
+            <pre class="body-text" style="font-size: {fontSize}px">{currentMessage.body_text || '(no content)'}</pre>
           {/if}
         </div>
       {/if}

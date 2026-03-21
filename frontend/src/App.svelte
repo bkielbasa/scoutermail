@@ -15,6 +15,8 @@
   import FolderList from '$lib/components/FolderList.svelte';
   import SignatureEditor from '$lib/components/SignatureEditor.svelte';
   import DraftsList from '$lib/components/DraftsList.svelte';
+  import ToastContainer from '$lib/components/ToastContainer.svelte';
+  import { showToast } from '$lib/stores/toast';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen, mode, unifiedMode } from '$lib/stores/ui';
@@ -179,42 +181,58 @@
     registerHandler('archive', async () => {
       const msg = get(selectedMessage);
       if (!msg) return;
-      await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
-      await loadMessages(get(activeFolder));
+      try {
+        await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+        await loadMessages(get(activeFolder));
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
     });
 
     // Delete: same as archive for v1
     registerHandler('delete', async () => {
       const msg = get(selectedMessage);
       if (!msg) return;
-      await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
-      await loadMessages(get(activeFolder));
+      try {
+        await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+        await loadMessages(get(activeFolder));
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
     });
 
     // Visual mode bulk archive
     registerHandler('visual-archive', async () => {
-      const sel = get(visualSelection);
-      const msgs = get(messages);
-      for (const idx of sel) {
-        const msg = msgs[idx];
-        if (msg) await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      try {
+        const sel = get(visualSelection);
+        const msgs = get(messages);
+        for (const idx of sel) {
+          const msg = msgs[idx];
+          if (msg) await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+        }
+        mode.set('NORMAL');
+        visualSelection.set(new Set());
+        await loadMessages(get(activeFolder));
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
       }
-      mode.set('NORMAL');
-      visualSelection.set(new Set());
-      await loadMessages(get(activeFolder));
     });
 
     // Visual mode bulk delete
     registerHandler('visual-delete', async () => {
-      const sel = get(visualSelection);
-      const msgs = get(messages);
-      for (const idx of sel) {
-        const msg = msgs[idx];
-        if (msg) await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+      try {
+        const sel = get(visualSelection);
+        const msgs = get(messages);
+        for (const idx of sel) {
+          const msg = msgs[idx];
+          if (msg) await invoke('delete_message', { uid: msg.uid, folder: msg.folder });
+        }
+        mode.set('NORMAL');
+        visualSelection.set(new Set());
+        await loadMessages(get(activeFolder));
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
       }
-      mode.set('NORMAL');
-      visualSelection.set(new Set());
-      await loadMessages(get(activeFolder));
     });
 
     // Star/flag toggle
@@ -233,16 +251,24 @@
     registerHandler('mark-spam', async () => {
       const msg = get(selectedMessage);
       if (!msg) return;
-      await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: 'Junk' });
-      await loadMessages(get(activeFolder));
-      await refreshFolderCounts();
+      try {
+        await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: 'Junk' });
+        await loadMessages(get(activeFolder));
+        await refreshFolderCounts();
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
     });
     registerHandler('cmd:spam', async () => {
       const msg = get(selectedMessage);
       if (!msg) return;
-      await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: 'Junk' });
-      await loadMessages(get(activeFolder));
-      await refreshFolderCounts();
+      try {
+        await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: 'Junk' });
+        await loadMessages(get(activeFolder));
+        await refreshFolderCounts();
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
     });
 
     // Print email
@@ -296,8 +322,8 @@
         try {
           await syncFolder(get(activeFolder));
           await refreshFolderCounts();
-        } catch (e) {
-          console.error('Background sync failed:', e);
+        } catch (e: unknown) {
+          showToast('Sync failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
         }
 
         // Check for due snoozed messages
@@ -380,6 +406,7 @@
   {#if showSignatureEditor}
     <SignatureEditor on:close={() => (showSignatureEditor = false)} />
   {/if}
+  <ToastContainer />
 </div>
 
 <style>

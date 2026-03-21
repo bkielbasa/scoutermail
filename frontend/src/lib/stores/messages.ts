@@ -6,6 +6,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 import { unreadCount, folderCounts } from '$lib/stores/accounts';
+import { loading } from '$lib/stores/ui';
 
 export interface Message {
   uid: number;
@@ -37,18 +38,23 @@ export const selectedMessage = derived(
 export const threadMessages = writable<Message[]>([]);
 
 export async function loadMessages(folder: string, resetSelection = true): Promise<void> {
-  const result = await invoke<Message[]>('get_messages', { folder });
-  messages.set(result);
-  if (resetSelection) {
-    selectedIndex.set(0);
-  } else {
-    // Clamp index to valid range
-    selectedIndex.update((i) => Math.min(i, Math.max(result.length - 1, 0)));
-  }
+  loading.set(true);
+  try {
+    const result = await invoke<Message[]>('get_messages', { folder });
+    messages.set(result);
+    if (resetSelection) {
+      selectedIndex.set(0);
+    } else {
+      // Clamp index to valid range
+      selectedIndex.update((i) => Math.min(i, Math.max(result.length - 1, 0)));
+    }
 
-  // Compute unread count for current folder
-  const unread = result.filter((m) => !m.flags?.includes('Seen')).length;
-  unreadCount.set(unread);
+    // Compute unread count for current folder
+    const unread = result.filter((m) => !m.flags?.includes('Seen')).length;
+    unreadCount.set(unread);
+  } finally {
+    loading.set(false);
+  }
 }
 
 export async function loadUnifiedMessages(folder: string): Promise<void> {
@@ -75,11 +81,16 @@ export async function loadThreadMessages(threadId: string): Promise<void> {
 }
 
 export async function syncFolder(folder: string): Promise<void> {
-  const newMessages = await invoke<Message[]>('sync_folder', { folder });
-  await loadMessages(folder);
+  loading.set(true);
+  try {
+    const newMessages = await invoke<Message[]>('sync_folder', { folder });
+    await loadMessages(folder);
 
-  if (newMessages.length > 0) {
-    notifyNewMail(newMessages);
+    if (newMessages.length > 0) {
+      notifyNewMail(newMessages);
+    }
+  } finally {
+    loading.set(false);
   }
 }
 

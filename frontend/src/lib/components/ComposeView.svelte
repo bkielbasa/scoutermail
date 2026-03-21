@@ -25,6 +25,61 @@
   let draftId: number | null = null;
   let saveTimer: ReturnType<typeof setInterval> | null = null;
   let draftSavedIndicator = false;
+  let textareaEl: HTMLTextAreaElement;
+
+  function wrapSelection(before: string, after: string) {
+    if (!textareaEl) return;
+    const start = textareaEl.selectionStart;
+    const end = textareaEl.selectionEnd;
+    const selected = body.slice(start, end) || 'text';
+    body = body.slice(0, start) + before + selected + after + body.slice(end);
+    setTimeout(() => {
+      textareaEl.selectionStart = start + before.length;
+      textareaEl.selectionEnd = start + before.length + selected.length;
+      textareaEl.focus();
+    }, 0);
+  }
+
+  function prefixLine(prefix: string) {
+    if (!textareaEl) return;
+    const start = textareaEl.selectionStart;
+    const lineStart = body.lastIndexOf('\n', start - 1) + 1;
+    body = body.slice(0, lineStart) + prefix + body.slice(lineStart);
+    setTimeout(() => {
+      textareaEl.selectionStart = textareaEl.selectionEnd = start + prefix.length;
+      textareaEl.focus();
+    }, 0);
+  }
+
+  function insertLink() {
+    if (!textareaEl) return;
+    const url = 'https://';
+    const start = textareaEl.selectionStart;
+    const end = textareaEl.selectionEnd;
+    const selected = body.slice(start, end) || 'link text';
+    body = body.slice(0, start) + '[' + selected + '](' + url + ')' + body.slice(end);
+    setTimeout(() => {
+      const urlStart = start + selected.length + 3;
+      textareaEl.selectionStart = urlStart;
+      textareaEl.selectionEnd = urlStart + url.length;
+      textareaEl.focus();
+    }, 0);
+  }
+
+  function handleTextareaKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'b') {
+        e.preventDefault();
+        wrapSelection('**', '**');
+      } else if (e.key === 'i') {
+        e.preventDefault();
+        wrapSelection('*', '*');
+      } else if (e.key === 'k') {
+        e.preventDefault();
+        insertLink();
+      }
+    }
+  }
 
   let currentMessage: Message | null = null;
   const unsubMessage = selectedMessage.subscribe((msg) => {
@@ -291,10 +346,21 @@
       />
     </div>
 
+    <div class="compose-toolbar">
+      <button type="button" title="Bold (Ctrl+B)" on:click={() => wrapSelection('**', '**')}>B</button>
+      <button type="button" title="Italic (Ctrl+I)" on:click={() => wrapSelection('*', '*')}>I</button>
+      <button type="button" title="Link (Ctrl+K)" on:click={() => insertLink()}>&#128279;</button>
+      <button type="button" title="Bullet list" on:click={() => prefixLine('- ')}>&bull;</button>
+      <button type="button" title="Quote" on:click={() => prefixLine('> ')}>&ldquo;</button>
+      <button type="button" title="Code" on:click={() => wrapSelection('`', '`')}>&lt;/&gt;</button>
+    </div>
+
     <div class="field-row body-row">
       <textarea
         class="body-input"
         bind:value={body}
+        bind:this={textareaEl}
+        on:keydown={handleTextareaKeydown}
         placeholder="Write your message..."
         disabled={sending}
       ></textarea>
@@ -428,6 +494,29 @@
 
   .toggle-btn:hover {
     text-decoration: underline;
+  }
+
+  .compose-toolbar {
+    display: flex;
+    gap: 2px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .compose-toolbar button {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-dim);
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+  .compose-toolbar button:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border);
   }
 
   .body-row {

@@ -33,6 +33,9 @@ export const defaultBindings: BindingDef[] = [
   { keys: 'h', action: 'toggle-html', mode: 'NORMAL', description: 'Toggle HTML view' },
   { keys: 'H', action: 'show-headers', mode: 'NORMAL', description: 'Show headers' },
   { keys: 'v', action: 'enter-visual', mode: 'NORMAL', description: 'Enter visual mode' },
+  { keys: '+', action: 'font-increase', mode: 'NORMAL', description: 'Increase font size' },
+  { keys: '-', action: 'font-decrease', mode: 'NORMAL', description: 'Decrease font size' },
+  { keys: '=', action: 'font-reset', mode: 'NORMAL', description: 'Reset font size' },
 
   // NORMAL mode — jump
   { keys: 'gg', action: 'list-top', mode: 'NORMAL', description: 'Jump to top of list' },

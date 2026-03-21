@@ -149,7 +149,7 @@
     // Scroll selected item into view
     setTimeout(() => {
       const el = document.querySelector('.message-item.selected');
-      el?.scrollIntoView({ block: 'nearest' });
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }, 0);
   });
   const unsubFocus = focusPane.subscribe((v) => (currentFocus = v));

@@ -10,3 +10,5 @@ export const searchOpen = writable(false);
 export const searchQuery = writable('');
 export const helpOpen = writable(false);
 export const unifiedMode = writable(false);
+export const loading = writable(false);
+export const readingFontSize = writable(13);
