@@ -9,7 +9,7 @@ use crate::accounts::manager::{AccountConfig, AccountManager};
 use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{AttachmentInfo, Contact, Database, Folder, Message, StoredEvent};
+use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Message, StoredEvent};
 use crate::store::search::SearchIndex;
 
 // ---------------------------------------------------------------------------
@@ -535,6 +535,45 @@ pub async fn respond_to_invite(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Draft commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn save_draft(
+    state: State<'_, AppState>,
+    draft: Draft,
+) -> Result<i64, String> {
+    let db = open_db(&state).await?;
+    db.save_draft(&draft).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_drafts(
+    state: State<'_, AppState>,
+) -> Result<Vec<Draft>, String> {
+    let db = open_db(&state).await?;
+    db.get_drafts().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_draft(
+    state: State<'_, AppState>,
+    draft_id: i64,
+) -> Result<Draft, String> {
+    let db = open_db(&state).await?;
+    db.get_draft(draft_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_draft(
+    state: State<'_, AppState>,
+    draft_id: i64,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.delete_draft(draft_id).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

@@ -60,6 +60,10 @@ pub fn run() {
             commands::move_message,
             commands::get_attachments,
             commands::save_attachment,
+            commands::save_draft,
+            commands::get_drafts,
+            commands::get_draft,
+            commands::delete_draft,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

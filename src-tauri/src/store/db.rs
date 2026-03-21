@@ -88,6 +88,20 @@ pub struct AttachmentInfo {
     pub size: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Draft {
+    pub draft_id: Option<i64>,
+    pub to_addr: String,
+    pub cc: String,
+    pub bcc: String,
+    pub subject: String,
+    pub body: String,
+    pub in_reply_to: Option<String>,
+    pub ref_headers: Option<String>,
+    pub reply_mode: String,
+    pub updated_at: i64,
+}
+
 // ---------------------------------------------------------------------------
 // Date parsing
 // ---------------------------------------------------------------------------
@@ -228,6 +242,19 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_dtstart ON events(dtstart);
+
+            CREATE TABLE IF NOT EXISTS drafts (
+                draft_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                to_addr     TEXT NOT NULL DEFAULT '',
+                cc          TEXT NOT NULL DEFAULT '',
+                bcc         TEXT NOT NULL DEFAULT '',
+                subject     TEXT NOT NULL DEFAULT '',
+                body        TEXT NOT NULL DEFAULT '',
+                in_reply_to TEXT,
+                ref_headers TEXT,
+                reply_mode  TEXT NOT NULL DEFAULT 'compose',
+                updated_at  INTEGER NOT NULL DEFAULT 0
+            );
             ",
         )?;
 
@@ -773,6 +800,115 @@ impl Database {
         self.conn.execute(
             "DELETE FROM attachments WHERE uid = ?1 AND folder = ?2",
             params![uid, folder],
+        )?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Draft CRUD
+    // -----------------------------------------------------------------------
+
+    /// Save a draft. If `draft.draft_id` is `None` or 0, inserts a new row
+    /// and returns the new ID. Otherwise updates the existing row.
+    pub fn save_draft(&self, draft: &Draft) -> Result<i64, StoreError> {
+        let is_new = draft.draft_id.is_none() || draft.draft_id == Some(0);
+        if is_new {
+            self.conn.execute(
+                "INSERT INTO drafts (to_addr, cc, bcc, subject, body, in_reply_to, ref_headers, reply_mode, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    draft.to_addr,
+                    draft.cc,
+                    draft.bcc,
+                    draft.subject,
+                    draft.body,
+                    draft.in_reply_to,
+                    draft.ref_headers,
+                    draft.reply_mode,
+                    draft.updated_at,
+                ],
+            )?;
+            Ok(self.conn.last_insert_rowid())
+        } else {
+            let id = draft.draft_id.unwrap();
+            self.conn.execute(
+                "UPDATE drafts SET to_addr = ?1, cc = ?2, bcc = ?3, subject = ?4, body = ?5,
+                    in_reply_to = ?6, ref_headers = ?7, reply_mode = ?8, updated_at = ?9
+                 WHERE draft_id = ?10",
+                params![
+                    draft.to_addr,
+                    draft.cc,
+                    draft.bcc,
+                    draft.subject,
+                    draft.body,
+                    draft.in_reply_to,
+                    draft.ref_headers,
+                    draft.reply_mode,
+                    draft.updated_at,
+                    id,
+                ],
+            )?;
+            Ok(id)
+        }
+    }
+
+    pub fn get_drafts(&self) -> Result<Vec<Draft>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT draft_id, to_addr, cc, bcc, subject, body, in_reply_to, ref_headers, reply_mode, updated_at
+             FROM drafts ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Draft {
+                draft_id: row.get(0)?,
+                to_addr: row.get(1)?,
+                cc: row.get(2)?,
+                bcc: row.get(3)?,
+                subject: row.get(4)?,
+                body: row.get(5)?,
+                in_reply_to: row.get(6)?,
+                ref_headers: row.get(7)?,
+                reply_mode: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+        let mut drafts = Vec::new();
+        for row in rows {
+            drafts.push(row?);
+        }
+        Ok(drafts)
+    }
+
+    pub fn get_draft(&self, draft_id: i64) -> Result<Draft, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT draft_id, to_addr, cc, bcc, subject, body, in_reply_to, ref_headers, reply_mode, updated_at
+                 FROM drafts WHERE draft_id = ?1",
+                params![draft_id],
+                |row| {
+                    Ok(Draft {
+                        draft_id: row.get(0)?,
+                        to_addr: row.get(1)?,
+                        cc: row.get(2)?,
+                        bcc: row.get(3)?,
+                        subject: row.get(4)?,
+                        body: row.get(5)?,
+                        in_reply_to: row.get(6)?,
+                        ref_headers: row.get(7)?,
+                        reply_mode: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound,
+                other => StoreError::Db(other),
+            })
+    }
+
+    pub fn delete_draft(&self, draft_id: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM drafts WHERE draft_id = ?1",
+            params![draft_id],
         )?;
         Ok(())
     }

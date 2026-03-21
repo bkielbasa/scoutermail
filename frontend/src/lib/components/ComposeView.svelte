@@ -21,6 +21,9 @@
   let error = '';
   let inReplyTo: string | null = null;
   let references: string | null = null;
+  let draftId: number | null = null;
+  let saveTimer: ReturnType<typeof setInterval> | null = null;
+  let draftSavedIndicator = false;
 
   let currentMessage: Message | null = null;
   const unsubMessage = selectedMessage.subscribe((msg) => {
@@ -70,6 +73,33 @@
     return parts.length > 0 ? parts.join(' ') : null;
   }
 
+  async function saveDraft(): Promise<void> {
+    if (!to && !subject && !body) return;
+    try {
+      const id = await invoke<number>('save_draft', {
+        draft: {
+          draft_id: draftId,
+          to_addr: to,
+          cc,
+          bcc,
+          subject,
+          body,
+          in_reply_to: inReplyTo,
+          ref_headers: references,
+          reply_mode: replyMode,
+          updated_at: Math.floor(Date.now() / 1000),
+        },
+      });
+      draftId = id;
+      draftSavedIndicator = true;
+      setTimeout(() => {
+        draftSavedIndicator = false;
+      }, 2000);
+    } catch {
+      // non-critical — draft save failure should not interrupt composing
+    }
+  }
+
   onMount(() => {
     mode.set('INSERT');
 
@@ -95,10 +125,16 @@
     }
 
     registerHandler('send', handleSend);
+
+    saveTimer = setInterval(saveDraft, 30000);
   });
 
   onDestroy(() => {
     unsubMessage();
+    if (saveTimer) {
+      clearInterval(saveTimer);
+      saveTimer = null;
+    }
   });
 
   function parseAddresses(input: string): string[] {
@@ -130,6 +166,13 @@
           references: references ? references.split(/\s+/).filter(Boolean) : [],
         },
       });
+      if (draftId) {
+        try {
+          await invoke('delete_draft', { draftId });
+        } catch {
+          // non-critical
+        }
+      }
       handleClose();
     } catch (err: unknown) {
       error = err instanceof Error ? err.message : String(err);
@@ -138,7 +181,9 @@
     }
   }
 
-  function handleClose(): void {
+  async function handleClose(): Promise<void> {
+    // Save draft one last time so user doesn't lose work
+    await saveDraft();
     mode.set('NORMAL');
     dispatch('close');
   }
@@ -229,6 +274,9 @@
   </div>
 
   <div class="compose-footer">
+    {#if draftSavedIndicator}
+      <span class="draft-saved">(draft saved)</span>
+    {/if}
     <span class="send-hint">Ctrl+Enter to send</span>
     <button
       class="send-btn"
@@ -390,6 +438,13 @@
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
+  }
+
+  .draft-saved {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: monospace;
+    opacity: 0.7;
   }
 
   .send-hint {
