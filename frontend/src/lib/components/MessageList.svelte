@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
   import {
     messages,
     selectedIndex,
@@ -80,10 +81,26 @@
       selectedIndex.set(Math.max(msgs.length - 1, 0));
     });
 
-    registerHandler('open-message', () => {
+    registerHandler('open-message', async () => {
       const msg = get(selectedMessage);
-      if (msg?.thread_id) {
+      if (!msg) return;
+      if (msg.thread_id) {
         loadThreadMessages(msg.thread_id);
+      }
+      // Mark as read if unread
+      if (!msg.flags?.includes('Seen')) {
+        const newFlags = msg.flags ? `${msg.flags} Seen` : 'Seen';
+        try {
+          await invoke('update_flags', { uid: msg.uid, folder: msg.folder, flags: newFlags });
+          // Update the local store immediately
+          messages.update((msgs) =>
+            msgs.map((m) =>
+              m.uid === msg.uid && m.folder === msg.folder ? { ...m, flags: newFlags } : m
+            )
+          );
+        } catch {
+          // Non-critical
+        }
       }
       focusPane.set('reading');
     });
