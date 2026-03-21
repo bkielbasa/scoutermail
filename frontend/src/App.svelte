@@ -216,6 +216,42 @@
       await loadMessages(get(activeFolder), false);
     });
 
+    // Mark as spam
+    registerHandler('mark-spam', async () => {
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: 'Junk' });
+      await loadMessages(get(activeFolder));
+      await refreshFolderCounts();
+    });
+    registerHandler('cmd:spam', async () => {
+      const msg = get(selectedMessage);
+      if (!msg) return;
+      await invoke('move_message', { uid: msg.uid, fromFolder: msg.folder, toFolder: 'Junk' });
+      await loadMessages(get(activeFolder));
+      await refreshFolderCounts();
+    });
+
+    // Print email
+    registerHandler('cmd:print', () => {
+      const iframe = document.querySelector('.html-frame') as HTMLIFrameElement;
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.print();
+      } else {
+        window.print();
+      }
+    });
+
+    // Snooze message
+    registerHandler('cmd:snooze', async (args?: string) => {
+      const msg = get(selectedMessage);
+      if (!msg || !args) return;
+      const minutes = parseInt(args.trim(), 10);
+      if (isNaN(minutes)) return;
+      await invoke('snooze_message', { uid: msg.uid, folder: msg.folder, durationMinutes: minutes });
+      await loadMessages(get(activeFolder));
+    });
+
     // Mark unread
     registerHandler('mark-unread', async () => {
       const msg = get(selectedMessage);
@@ -249,6 +285,19 @@
           await refreshFolderCounts();
         } catch (e) {
           console.error('Background sync failed:', e);
+        }
+
+        // Check for due snoozed messages
+        try {
+          const snoozed = await invoke<Array<[number, string]>>('check_snoozed');
+          if (snoozed.length > 0) {
+            for (const [uid, folder] of snoozed) {
+              await invoke('unsnooze_message', { uid, folder });
+            }
+            await loadMessages(get(activeFolder), false);
+          }
+        } catch (e) {
+          console.error('Snooze check failed:', e);
         }
       }
     }, 5 * 60 * 1000);

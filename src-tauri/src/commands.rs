@@ -448,6 +448,43 @@ pub async fn move_message(
 }
 
 // ---------------------------------------------------------------------------
+// Snooze
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn snooze_message(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+    duration_minutes: i64,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp();
+    let wake_at = now + duration_minutes * 60;
+    let db = open_db(&state).await?;
+    db.snooze_message(uid, &folder, wake_at)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_snoozed(
+    state: State<'_, AppState>,
+) -> Result<Vec<(u32, String)>, String> {
+    let now = chrono::Utc::now().timestamp();
+    let db = open_db(&state).await?;
+    db.get_due_snoozed(now).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn unsnooze_message(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.unsnooze(uid, &folder).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Contacts
 // ---------------------------------------------------------------------------
 

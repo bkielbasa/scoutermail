@@ -82,6 +82,9 @@ pub fn run() {
             commands::delete_draft,
             commands::set_setting,
             commands::get_setting,
+            commands::snooze_message,
+            commands::check_snoozed,
+            commands::unsnooze_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -248,6 +248,15 @@ impl Database {
                 value TEXT NOT NULL DEFAULT ''
             );
 
+            CREATE TABLE IF NOT EXISTS snoozed (
+                uid         INTEGER NOT NULL,
+                folder      TEXT NOT NULL,
+                wake_at     INTEGER NOT NULL,
+                PRIMARY KEY (uid, folder)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_snoozed_wake ON snoozed(wake_at);
+
             CREATE TABLE IF NOT EXISTS drafts (
                 draft_id    INTEGER PRIMARY KEY AUTOINCREMENT,
                 to_addr     TEXT NOT NULL DEFAULT '',
@@ -941,6 +950,53 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(StoreError::Db(e)),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Snooze CRUD
+    // -----------------------------------------------------------------------
+
+    pub fn snooze_message(&self, uid: u32, folder: &str, wake_at: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO snoozed (uid, folder, wake_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(uid, folder) DO UPDATE SET wake_at = excluded.wake_at",
+            params![uid, folder, wake_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_due_snoozed(&self, now: i64) -> Result<Vec<(u32, String)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT uid, folder FROM snoozed WHERE wake_at <= ?1",
+        )?;
+        let rows = stmt.query_map(params![now], |row| {
+            Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn unsnooze(&self, uid: u32, folder: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM snoozed WHERE uid = ?1 AND folder = ?2",
+            params![uid, folder],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_snoozed(&self, uid: u32, folder: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM snoozed WHERE uid = ?1 AND folder = ?2",
+                params![uid, folder],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false)
     }
 
     pub fn get_events_for_message(

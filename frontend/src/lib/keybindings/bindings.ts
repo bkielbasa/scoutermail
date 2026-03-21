@@ -27,6 +27,7 @@ export const defaultBindings: BindingDef[] = [
   { keys: 'd', action: 'delete', mode: 'NORMAL', description: 'Delete' },
   { keys: 's', action: 'star', mode: 'NORMAL', description: 'Star/unstar' },
   { keys: 'u', action: 'mark-unread', mode: 'NORMAL', description: 'Mark unread' },
+  { keys: '!', action: 'mark-spam', mode: 'NORMAL', description: 'Mark as spam' },
 
   // NORMAL mode — view
   { keys: 'h', action: 'toggle-html', mode: 'NORMAL', description: 'Toggle HTML view' },
