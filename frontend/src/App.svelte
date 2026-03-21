@@ -13,6 +13,7 @@
   import ContactsList from '$lib/components/ContactsList.svelte';
   import CalendarView from '$lib/components/CalendarView.svelte';
   import FolderList from '$lib/components/FolderList.svelte';
+  import SignatureEditor from '$lib/components/SignatureEditor.svelte';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen } from '$lib/stores/ui';
@@ -24,6 +25,7 @@
   let showContacts = false;
   let showCalendar = false;
   let showFolders = false;
+  let showSignatureEditor = false;
   let hasAccounts = false;
   let isSearchOpen = false;
   let isHelpOpen = false;
@@ -123,6 +125,11 @@
       composing = false;
       showContacts = false;
       showFolders = false;
+    });
+
+    // :signature command
+    registerHandler('cmd:signature', () => {
+      showSignatureEditor = !showSignatureEditor;
     });
 
     // :move command — move message to another IMAP folder
@@ -259,6 +266,9 @@
   {/if}
   {#if isHelpOpen}
     <HelpOverlay />
+  {/if}
+  {#if showSignatureEditor}
+    <SignatureEditor on:close={() => (showSignatureEditor = false)} />
   {/if}
 </div>
 

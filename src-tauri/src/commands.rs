@@ -577,6 +577,29 @@ pub async fn delete_draft(
 }
 
 // ---------------------------------------------------------------------------
+// Settings commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn set_setting(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.set_setting(&key, &value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let db = open_db(&state).await?;
+    db.get_setting(&key).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Attachment commands
 // ---------------------------------------------------------------------------
 

@@ -100,8 +100,20 @@
     }
   }
 
-  onMount(() => {
+  async function loadSignature(): Promise<string> {
+    try {
+      const val = await invoke<string | null>('get_setting', { key: 'signature' });
+      return val || '';
+    } catch {
+      return '';
+    }
+  }
+
+  onMount(async () => {
     mode.set('INSERT');
+
+    const signature = await loadSignature();
+    const sigBlock = signature ? `\n\n-- \n${signature}` : '';
 
     if (currentMessage && replyMode !== 'compose') {
       const msg = currentMessage;
@@ -110,7 +122,8 @@
       if (replyMode === 'reply' || replyMode === 'reply-all') {
         to = msg.from_addr || '';
         subject = `Re: ${cleanSubject}`;
-        body = buildQuotedBody(msg);
+        const quoted = buildQuotedBody(msg);
+        body = sigBlock + quoted;
         inReplyTo = msg.message_id || null;
         references = buildReferences(msg);
 
@@ -120,8 +133,11 @@
         }
       } else if (replyMode === 'forward') {
         subject = `Fwd: ${cleanSubject}`;
-        body = buildForwardBody(msg);
+        const forwarded = buildForwardBody(msg);
+        body = sigBlock + forwarded;
       }
+    } else {
+      body = sigBlock;
     }
 
     registerHandler('send', handleSend);
