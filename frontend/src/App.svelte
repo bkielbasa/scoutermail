@@ -160,7 +160,7 @@
         ? currentFlags.replace('Flagged', '').trim()
         : `${currentFlags} Flagged`.trim();
       await invoke('update_flags', { uid: msg.uid, folder: msg.folder, flags: newFlags });
-      await loadMessages(get(activeFolder));
+      await loadMessages(get(activeFolder), false);
     });
 
     // Mark unread
@@ -170,7 +170,7 @@
       const currentFlags = msg.flags ?? '';
       const newFlags = currentFlags.replace('Seen', '').trim();
       await invoke('update_flags', { uid: msg.uid, folder: msg.folder, flags: newFlags });
-      await loadMessages(get(activeFolder));
+      await loadMessages(get(activeFolder), false);
     });
 
     // Account switching (1-9)

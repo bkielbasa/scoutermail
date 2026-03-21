@@ -30,29 +30,30 @@
 
   let messageEvents: StoredEvent[] = [];
 
+  /**
+   * Pre-process HTML to neutralize all links. Replaces href with data-href
+   * so the browser cannot navigate, even if JS doesn't intercept the click.
+   */
+  function neutralizeLinks(html: string): string {
+    return html.replace(
+      /<a\s([^>]*?)href\s*=\s*["']([^"']+)["']([^>]*?)>/gi,
+      '<a $1data-href="$2" href="javascript:void(0)" style="cursor:pointer" $3>'
+    );
+  }
+
   function setupIframe(iframe: HTMLIFrameElement): void {
     const doc = iframe.contentDocument;
     if (!doc) return;
     // Auto-resize to content height
     iframe.style.height = doc.documentElement.scrollHeight + 'px';
-    // Strip href from all links and store in data attribute to prevent navigation
-    const anchors = doc.querySelectorAll('a[href]');
-    anchors.forEach((a) => {
-      const href = a.getAttribute('href');
-      if (href && href !== '#' && !href.startsWith('about:')) {
-        a.removeAttribute('href');
-        a.setAttribute('data-href', href);
-        (a as HTMLElement).style.cursor = 'pointer';
-      }
-    });
-    // Intercept clicks and open in default browser
+    // Intercept clicks on neutralized links and open in default browser
     doc.addEventListener('click', (e: MouseEvent) => {
       const anchor = (e.target as HTMLElement).closest('a');
       if (!anchor) return;
       e.preventDefault();
       e.stopPropagation();
       const href = anchor.getAttribute('data-href');
-      if (href) {
+      if (href && href !== '#') {
         open(href);
       }
     });
@@ -227,7 +228,7 @@
                 <div class="thread-body">
                   {#if showHtml && msg.body_html}
                     <iframe
-                      srcdoc={msg.body_html}
+                      srcdoc={neutralizeLinks(msg.body_html)}
                       sandbox="allow-same-origin"
                       title="Email content"
                       class="html-frame"
@@ -245,7 +246,7 @@
         <div class="single-body">
           {#if showHtml && currentMessage.body_html}
             <iframe
-              srcdoc={currentMessage.body_html}
+              srcdoc={neutralizeLinks(currentMessage.body_html)}
               sandbox="allow-same-origin"
               title="Email content"
               class="html-frame"

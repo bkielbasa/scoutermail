@@ -32,10 +32,15 @@ export const selectedMessage = derived(
 );
 export const threadMessages = writable<Message[]>([]);
 
-export async function loadMessages(folder: string): Promise<void> {
+export async function loadMessages(folder: string, resetSelection = true): Promise<void> {
   const result = await invoke<Message[]>('get_messages', { folder });
   messages.set(result);
-  selectedIndex.set(0);
+  if (resetSelection) {
+    selectedIndex.set(0);
+  } else {
+    // Clamp index to valid range
+    selectedIndex.update((i) => Math.min(i, Math.max(result.length - 1, 0)));
+  }
 
   // Compute unread count for current folder
   const unread = result.filter((m) => !m.flags?.includes('Seen')).length;
