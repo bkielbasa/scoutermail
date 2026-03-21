@@ -349,8 +349,48 @@ pub async fn update_flags(
     folder: String,
     flags: String,
 ) -> Result<(), String> {
+    // Always update local DB first
     let db = open_db(&state).await?;
-    db.update_flags(uid, &folder, &flags).map_err(|e| e.to_string())
+    db.update_flags(uid, &folder, &flags).map_err(|e| e.to_string())?;
+
+    // Try to sync flags to IMAP server (best-effort, don't fail if IMAP is unreachable)
+    let id = get_active_id(&state).await?;
+    let imap_config = {
+        let mgr = state.account_manager.lock().await;
+        mgr.get_imap_config(&id).map_err(|e| e.to_string())?
+    };
+
+    // Map flag names to IMAP flag format
+    let imap_flags: Vec<&str> = flags
+        .split_whitespace()
+        .filter_map(|f| match f {
+            "Seen" => Some("\\Seen"),
+            "Flagged" => Some("\\Flagged"),
+            "Answered" => Some("\\Answered"),
+            "Deleted" => Some("\\Deleted"),
+            "Draft" => Some("\\Draft"),
+            _ => None,
+        })
+        .collect();
+    let imap_flags_str = imap_flags.join(" ");
+
+    let folder_clone = folder.clone();
+    let handle = tokio::runtime::Handle::current();
+    let _ = tokio::task::spawn_blocking(move || {
+        handle.block_on(async move {
+            let mut session = imap_client::connect(&imap_config)
+                .await
+                .map_err(|e| e.to_string())?;
+            imap_client::set_flags(&mut session, uid, &folder_clone, &imap_flags_str)
+                .await
+                .map_err(|e| e.to_string())?;
+            let _ = session.logout().await;
+            Ok::<(), String>(())
+        })
+    })
+    .await;
+
+    Ok(())
 }
 
 #[tauri::command]

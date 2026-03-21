@@ -7,6 +7,7 @@
   import { registerHandler } from '$lib/keybindings/engine';
 
   export let replyMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
+  export let initialDraft: any = null;
 
   const dispatch = createEventDispatcher();
 
@@ -115,7 +116,18 @@
     const signature = await loadSignature();
     const sigBlock = signature ? `\n\n-- \n${signature}` : '';
 
-    if (currentMessage && replyMode !== 'compose') {
+    if (initialDraft) {
+      to = initialDraft.to_addr || '';
+      cc = initialDraft.cc || '';
+      bcc = initialDraft.bcc || '';
+      subject = initialDraft.subject || '';
+      body = initialDraft.body || '';
+      inReplyTo = initialDraft.in_reply_to || null;
+      references = initialDraft.ref_headers || null;
+      draftId = initialDraft.draft_id || null;
+      if (cc) showCc = true;
+      if (bcc) showBcc = true;
+    } else if (currentMessage && replyMode !== 'compose') {
       const msg = currentMessage;
       const cleanSubject = stripSubjectPrefix(msg.subject);
 

@@ -183,6 +183,9 @@
           <span class="date">{formatDate(msg.date)}</span>
         </div>
         <div class="subject">{msg.subject || '(no subject)'}</div>
+        {#if msg.body_text}
+          <div class="snippet">{msg.body_text.slice(0, 80).replace(/\n/g, ' ').trim()}</div>
+        {/if}
       </button>
     {/each}
   {/if}
@@ -263,6 +266,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .snippet {
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     margin-top: 2px;
   }
 </style>

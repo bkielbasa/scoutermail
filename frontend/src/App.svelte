@@ -14,6 +14,7 @@
   import CalendarView from '$lib/components/CalendarView.svelte';
   import FolderList from '$lib/components/FolderList.svelte';
   import SignatureEditor from '$lib/components/SignatureEditor.svelte';
+  import DraftsList from '$lib/components/DraftsList.svelte';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
   import { searchOpen, helpOpen, mode } from '$lib/stores/ui';
@@ -25,7 +26,9 @@
   let showContacts = false;
   let showCalendar = false;
   let showFolders = false;
+  let showDrafts = false;
   let showSignatureEditor = false;
+  let initialDraft: any = null;
   let hasAccounts = false;
   let isSearchOpen = false;
   let isHelpOpen = false;
@@ -61,6 +64,8 @@
     composing = true;
     showContacts = false;
     showCalendar = false;
+    showDrafts = false;
+    initialDraft = null;
   }
 
   async function navigateToFolder(folder: string): Promise<void> {
@@ -68,7 +73,16 @@
     showContacts = false;
     showCalendar = false;
     showFolders = false;
+    showDrafts = false;
     await loadMessages(folder);
+  }
+
+  function handleResumeDraft(e: CustomEvent): void {
+    const draft = e.detail;
+    initialDraft = draft;
+    composeMode = draft.reply_mode || 'compose';
+    composing = true;
+    showDrafts = false;
   }
 
   async function initAccounts(): Promise<void> {
@@ -103,7 +117,13 @@
 
     registerHandler('goto-inbox', () => navigateToFolder('INBOX'));
     registerHandler('goto-sent', () => navigateToFolder('Sent'));
-    registerHandler('goto-drafts', () => navigateToFolder('Drafts'));
+    registerHandler('goto-drafts', () => {
+      showDrafts = true;
+      composing = false;
+      showContacts = false;
+      showCalendar = false;
+      showFolders = false;
+    });
     registerHandler('goto-archive', () => navigateToFolder('Archive'));
 
     // :folders command
@@ -278,7 +298,9 @@
       ></div>
       <div class="reading-pane">
         {#if composing}
-          <ComposeView replyMode={composeMode} on:close={() => (composing = false)} />
+          <ComposeView replyMode={composeMode} {initialDraft} on:close={() => { composing = false; initialDraft = null; }} />
+        {:else if showDrafts}
+          <DraftsList on:resume={handleResumeDraft} />
         {:else if showCalendar}
           <CalendarView />
         {:else if showContacts}

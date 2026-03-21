@@ -101,6 +101,16 @@ pub async fn move_message(session: &mut ImapSession, uid: u32, from: &str, to: &
     }
 }
 
+/// Set flags on a message by UID (replaces all flags).
+pub async fn set_flags(session: &mut ImapSession, uid: u32, folder: &str, flags: &str) -> Result<(), ImapError> {
+    session.select(folder).await?;
+    let uid_str = uid.to_string();
+    let store_stream = session.uid_store(&uid_str, &format!("FLAGS ({})", flags)).await?;
+    // Consume the stream to complete the command
+    let _: Vec<_> = store_stream.collect::<Vec<_>>().await;
+    Ok(())
+}
+
 /// List all folders (mailboxes) on the server.
 pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<String>, ImapError> {
     let names_stream = session.list(Some(""), Some("*")).await?;
