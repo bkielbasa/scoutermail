@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { mode } from '$lib/stores/ui';
+  import { mode, unifiedMode } from '$lib/stores/ui';
   import { activeAccount, activeFolder, unreadCount } from '$lib/stores/accounts';
 
   const modeColors: Record<string, string> = {
@@ -13,16 +13,18 @@
   let account = $state<{ name: string; email: string } | null>(null);
   let folder = $state('INBOX');
   let unread = $state(0);
+  let isUnified = $state(false);
 
   mode.subscribe((v) => (currentMode = v));
   activeAccount.subscribe((v) => (account = v));
   activeFolder.subscribe((v) => (folder = v));
   unreadCount.subscribe((v) => (unread = v));
+  unifiedMode.subscribe((v) => (isUnified = v));
 </script>
 
 <div class="status-bar">
   <span class="left">
-    {account ? account.name : 'no account'}:{folder}{#if unread > 0}({unread}){/if}
+    {isUnified ? 'All Accounts' : (account ? account.name : 'no account')}:{folder}{#if unread > 0}({unread}){/if}
   </span>
   <span class="center" style="color: {modeColors[currentMode]}">
     {currentMode}

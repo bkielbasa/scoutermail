@@ -9,7 +9,7 @@
     loadThreadMessages,
     visualSelection,
   } from '$lib/stores/messages';
-  import { focusPane, mode } from '$lib/stores/ui';
+  import { focusPane, mode, unifiedMode } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
 
   function formatDate(dateStr: string | null): string {
@@ -157,11 +157,15 @@
   let currentVisualSelection: Set<number> = new Set();
   const unsubVisual = visualSelection.subscribe((v) => (currentVisualSelection = v));
 
+  let isUnified = false;
+  const unsubUnified = unifiedMode.subscribe((v) => (isUnified = v));
+
   onDestroy(() => {
     unsubMessages();
     unsubIndex();
     unsubFocus();
     unsubVisual();
+    unsubUnified();
   });
 </script>
 
@@ -179,7 +183,12 @@
         type="button"
       >
         <div class="msg-header">
-          <span class="sender">{extractName(msg.from_addr)}</span>
+          <span class="sender">
+            {#if isUnified && msg.account_name}
+              <span class="account-badge">{msg.account_name}</span>
+            {/if}
+            {extractName(msg.from_addr)}
+          </span>
           <span class="date">{formatDate(msg.date)}</span>
         </div>
         <div class="subject">{msg.subject || '(no subject)'}</div>
@@ -276,5 +285,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     margin-top: 2px;
+  }
+
+  .account-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--accent-dim, rgba(99, 102, 241, 0.15));
+    color: var(--accent, #6366f1);
+    margin-right: 4px;
+    vertical-align: baseline;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 </style>

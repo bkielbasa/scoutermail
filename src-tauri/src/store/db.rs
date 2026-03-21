@@ -397,6 +397,45 @@ impl Database {
         Ok(messages)
     }
 
+    /// Like `get_messages_by_folder` but also returns the `date_epoch` value
+    /// for each message so callers can do cross-account sorting.
+    pub fn get_messages_with_epoch(
+        &self,
+        folder: &str,
+    ) -> Result<Vec<(Message, i64)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
+                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to,
+                    date_epoch
+             FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC",
+        )?;
+        let rows = stmt.query_map(params![folder], |row| {
+            let msg = Message {
+                uid: row.get(0)?,
+                message_id: row.get(1)?,
+                folder: row.get(2)?,
+                subject: row.get(3)?,
+                from_addr: row.get(4)?,
+                to_addr: row.get(5)?,
+                cc: row.get(6)?,
+                date: row.get(7)?,
+                body_text: row.get(8)?,
+                body_html: row.get(9)?,
+                flags: row.get(10)?,
+                thread_id: row.get(11)?,
+                ref_headers: row.get(12)?,
+                in_reply_to: row.get(13)?,
+            };
+            let epoch: i64 = row.get(14)?;
+            Ok((msg, epoch))
+        })?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
+    }
+
     pub fn get_threads_by_folder(&self, folder: &str) -> Result<Vec<Thread>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT m.thread_id, m.subject, MAX(m.date) as last_date, COUNT(*) as cnt

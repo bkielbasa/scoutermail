@@ -22,6 +22,9 @@ export interface Message {
   thread_id: string | null;
   ref_headers: string | null;
   in_reply_to: string | null;
+  // Unified inbox fields (only present when in unified mode)
+  account_id?: string;
+  account_name?: string;
 }
 
 export const messages = writable<Message[]>([]);
@@ -44,6 +47,15 @@ export async function loadMessages(folder: string, resetSelection = true): Promi
   }
 
   // Compute unread count for current folder
+  const unread = result.filter((m) => !m.flags?.includes('Seen')).length;
+  unreadCount.set(unread);
+}
+
+export async function loadUnifiedMessages(folder: string): Promise<void> {
+  const result = await invoke<Message[]>('get_unified_messages', { folder });
+  messages.set(result);
+  selectedIndex.set(0);
+
   const unread = result.filter((m) => !m.flags?.includes('Seen')).length;
   unreadCount.set(unread);
 }

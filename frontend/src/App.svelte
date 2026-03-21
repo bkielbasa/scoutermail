@@ -17,9 +17,9 @@
   import DraftsList from '$lib/components/DraftsList.svelte';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
-  import { searchOpen, helpOpen, mode } from '$lib/stores/ui';
+  import { searchOpen, helpOpen, mode, unifiedMode } from '$lib/stores/ui';
   import { accounts, activeAccount, activeFolder, type Account } from '$lib/stores/accounts';
-  import { syncFolder, loadMessages, selectedMessage, messages, visualSelection, refreshFolderCounts } from '$lib/stores/messages';
+  import { syncFolder, loadMessages, loadUnifiedMessages, selectedMessage, messages, visualSelection, refreshFolderCounts } from '$lib/stores/messages';
 
   let composing = false;
   let composeMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
@@ -69,6 +69,7 @@
   }
 
   async function navigateToFolder(folder: string): Promise<void> {
+    unifiedMode.set(false);
     activeFolder.set(folder);
     showContacts = false;
     showCalendar = false;
@@ -150,6 +151,18 @@
     // :signature command
     registerHandler('cmd:signature', () => {
       showSignatureEditor = !showSignatureEditor;
+    });
+
+    // :unified command — show unified inbox across all accounts
+    registerHandler('cmd:unified', async () => {
+      unifiedMode.set(true);
+      activeFolder.set('INBOX');
+      showContacts = false;
+      showCalendar = false;
+      showFolders = false;
+      showDrafts = false;
+      composing = false;
+      await loadUnifiedMessages('INBOX');
     });
 
     // :move command — move message to another IMAP folder

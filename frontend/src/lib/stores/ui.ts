@@ -9,3 +9,4 @@ export const commandInput = writable('');
 export const searchOpen = writable(false);
 export const searchQuery = writable('');
 export const helpOpen = writable(false);
+export const unifiedMode = writable(false);

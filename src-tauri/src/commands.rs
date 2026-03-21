@@ -12,6 +12,8 @@ use crate::smtp::client::ComposeEmail;
 use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Message, StoredEvent};
 use crate::store::search::SearchIndex;
 
+use serde::Serialize;
+
 // ---------------------------------------------------------------------------
 // App state
 // ---------------------------------------------------------------------------
@@ -152,6 +154,75 @@ pub async fn get_folder_counts(
 ) -> Result<Vec<(String, i64, i64)>, String> {
     let db = open_db(&state).await?;
     db.get_folder_counts().map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Unified inbox
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnifiedMessage {
+    pub account_id: String,
+    pub account_name: String,
+    pub uid: u32,
+    pub message_id: Option<String>,
+    pub folder: String,
+    pub subject: Option<String>,
+    pub from_addr: Option<String>,
+    pub to_addr: Option<String>,
+    pub cc: Option<String>,
+    pub date: Option<String>,
+    pub date_epoch: i64,
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub flags: Option<String>,
+    pub thread_id: Option<String>,
+    pub ref_headers: Option<String>,
+    pub in_reply_to: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_unified_messages(
+    state: State<'_, AppState>,
+    folder: String,
+) -> Result<Vec<UnifiedMessage>, String> {
+    let mgr = state.account_manager.lock().await;
+    let accounts = mgr.list_accounts().to_vec();
+    let mut all_messages: Vec<UnifiedMessage> = Vec::new();
+
+    for acct in &accounts {
+        let db_path = mgr.db_path(&acct.id).to_string_lossy().to_string();
+        if let Ok(db) = Database::open(&db_path) {
+            if let Ok(messages) = db.get_messages_with_epoch(&folder) {
+                for (msg, epoch) in messages {
+                    all_messages.push(UnifiedMessage {
+                        account_id: acct.id.clone(),
+                        account_name: acct.name.clone(),
+                        uid: msg.uid,
+                        message_id: msg.message_id,
+                        folder: msg.folder,
+                        subject: msg.subject,
+                        from_addr: msg.from_addr,
+                        to_addr: msg.to_addr,
+                        cc: msg.cc,
+                        date: msg.date,
+                        date_epoch: epoch,
+                        body_text: msg.body_text,
+                        body_html: msg.body_html,
+                        flags: msg.flags,
+                        thread_id: msg.thread_id,
+                        ref_headers: msg.ref_headers,
+                        in_reply_to: msg.in_reply_to,
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by date_epoch descending (newest first)
+    all_messages.sort_by(|a, b| b.date_epoch.cmp(&a.date_epoch));
+
+    Ok(all_messages)
 }
 
 // ---------------------------------------------------------------------------
