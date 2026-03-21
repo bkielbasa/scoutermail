@@ -33,6 +33,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("open-external-links")
+                .on_navigation(|_webview, url| {
+                    let s = url.as_str();
+                    if s.starts_with("tauri://")
+                        || s.starts_with("http://localhost")
+                        || s.starts_with("about:")
+                        || s.starts_with("javascript:")
+                    {
+                        return true;
+                    }
+                    let _ = open::that(s);
+                    false
+                })
+                .build(),
+        )
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::add_account,
