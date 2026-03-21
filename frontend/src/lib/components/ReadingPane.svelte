@@ -35,12 +35,25 @@
     if (!doc) return;
     // Auto-resize to content height
     iframe.style.height = doc.documentElement.scrollHeight + 'px';
-    // Intercept all link clicks and open in default browser
+    // Strip href from all links and store in data attribute to prevent navigation
+    const anchors = doc.querySelectorAll('a[href]');
+    anchors.forEach((a) => {
+      const href = a.getAttribute('href');
+      if (href && href !== '#' && !href.startsWith('about:')) {
+        a.removeAttribute('href');
+        a.setAttribute('data-href', href);
+        (a as HTMLElement).style.cursor = 'pointer';
+      }
+    });
+    // Intercept clicks and open in default browser
     doc.addEventListener('click', (e: MouseEvent) => {
       const anchor = (e.target as HTMLElement).closest('a');
-      if (anchor?.href && anchor.href !== '#' && !anchor.href.startsWith('about:')) {
-        e.preventDefault();
-        open(anchor.href);
+      if (!anchor) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const href = anchor.getAttribute('data-href');
+      if (href) {
+        open(href);
       }
     });
   }
