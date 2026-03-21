@@ -9,7 +9,7 @@ use crate::accounts::manager::{AccountConfig, AccountManager};
 use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{Contact, Database, Folder, Message, StoredEvent};
+use crate::store::db::{AttachmentInfo, Contact, Database, Folder, Message, StoredEvent};
 use crate::store::search::SearchIndex;
 
 // ---------------------------------------------------------------------------
@@ -535,4 +535,36 @@ pub async fn respond_to_invite(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Attachment commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_attachments(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+) -> Result<Vec<AttachmentInfo>, String> {
+    let db = open_db(&state).await?;
+    db.get_attachments_for_message(uid, &folder)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_attachment(
+    state: State<'_, AppState>,
+    attachment_id: i64,
+) -> Result<String, String> {
+    let db = open_db(&state).await?;
+    let (data, filename) = db
+        .get_attachment_data(attachment_id)
+        .map_err(|e| e.to_string())?;
+    let downloads =
+        dirs::download_dir().unwrap_or_else(|| dirs::home_dir().unwrap().join("Downloads"));
+    let target_name = filename.unwrap_or_else(|| "attachment".to_string());
+    let path = downloads.join(&target_name);
+    std::fs::write(&path, &data).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }

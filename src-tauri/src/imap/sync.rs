@@ -170,6 +170,22 @@ pub async fn sync_folder(
         db.upsert_message(&msg)
             .map_err(|e| ImapError::Imap(format!("upsert_message: {}", e)))?;
 
+        // Store attachments
+        if !parsed_email.attachments.is_empty() {
+            // Remove old attachments for this message (in case of re-sync)
+            let _ = db.delete_attachments_for_message(uid, folder_name);
+            for att in &parsed_email.attachments {
+                let _ = db.insert_attachment(
+                    uid,
+                    folder_name,
+                    Some(&att.filename),
+                    Some(&att.content_type),
+                    Some(att.size as i64),
+                    &att.data,
+                );
+            }
+        }
+
         // Detect and store calendar events from ICS parts
         if !parsed_email.calendar_data.is_empty() {
             for ics_data in &parsed_email.calendar_data {

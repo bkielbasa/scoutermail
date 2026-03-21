@@ -78,6 +78,16 @@ pub struct Contact {
     pub frequency: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentInfo {
+    pub attachment_id: i64,
+    pub uid: u32,
+    pub folder: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+}
+
 // ---------------------------------------------------------------------------
 // Date parsing
 // ---------------------------------------------------------------------------
@@ -685,6 +695,85 @@ impl Database {
         if rows == 0 {
             return Err(StoreError::NotFound);
         }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Attachment CRUD
+    // -----------------------------------------------------------------------
+
+    pub fn insert_attachment(
+        &self,
+        uid: u32,
+        folder: &str,
+        filename: Option<&str>,
+        mime_type: Option<&str>,
+        size: Option<i64>,
+        content: &[u8],
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO attachments (uid, folder, filename, mime_type, size, content)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![uid, folder, filename, mime_type, size, content],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_attachments_for_message(
+        &self,
+        uid: u32,
+        folder: &str,
+    ) -> Result<Vec<AttachmentInfo>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT attachment_id, uid, folder, filename, mime_type, size
+             FROM attachments WHERE uid = ?1 AND folder = ?2",
+        )?;
+        let rows = stmt.query_map(params![uid, folder], |row| {
+            Ok(AttachmentInfo {
+                attachment_id: row.get(0)?,
+                uid: row.get(1)?,
+                folder: row.get(2)?,
+                filename: row.get(3)?,
+                mime_type: row.get(4)?,
+                size: row.get(5)?,
+            })
+        })?;
+        let mut attachments = Vec::new();
+        for row in rows {
+            attachments.push(row?);
+        }
+        Ok(attachments)
+    }
+
+    pub fn get_attachment_data(
+        &self,
+        attachment_id: i64,
+    ) -> Result<(Vec<u8>, Option<String>), StoreError> {
+        self.conn
+            .query_row(
+                "SELECT content, filename FROM attachments WHERE attachment_id = ?1",
+                params![attachment_id],
+                |row| {
+                    let data: Vec<u8> = row.get(0)?;
+                    let filename: Option<String> = row.get(1)?;
+                    Ok((data, filename))
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound,
+                other => StoreError::Db(other),
+            })
+    }
+
+    pub fn delete_attachments_for_message(
+        &self,
+        uid: u32,
+        folder: &str,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM attachments WHERE uid = ?1 AND folder = ?2",
+            params![uid, folder],
+        )?;
         Ok(())
     }
 

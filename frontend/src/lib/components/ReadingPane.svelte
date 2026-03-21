@@ -10,6 +10,7 @@
   import { registerHandler } from '$lib/keybindings/engine';
   import { open } from '@tauri-apps/plugin-shell';
   import InviteCard from './InviteCard.svelte';
+  import AttachmentList from './AttachmentList.svelte';
 
   interface StoredEvent {
     event_uid: string;
@@ -190,6 +191,8 @@
       {#if messageEvents.length > 0}
         <InviteCard events={messageEvents} />
       {/if}
+
+      <AttachmentList uid={currentMessage.uid} folder={currentMessage.folder} />
 
       {#if thread.length > 1}
         <div class="thread-view">
