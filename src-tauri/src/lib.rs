@@ -50,6 +50,10 @@ pub fn run() {
             commands::delete_message,
             commands::search_contacts,
             commands::get_all_contacts,
+            commands::get_events,
+            commands::get_events_in_range,
+            commands::get_events_for_message,
+            commands::respond_to_invite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

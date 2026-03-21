@@ -6,9 +6,10 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::accounts::manager::{AccountConfig, AccountManager};
+use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{Contact, Database, Folder, Message};
+use crate::store::db::{Contact, Database, Folder, Message, StoredEvent};
 use crate::store::search::SearchIndex;
 
 // ---------------------------------------------------------------------------
@@ -372,4 +373,111 @@ pub async fn get_all_contacts(
 ) -> Result<Vec<Contact>, String> {
     let db = open_db(&state).await?;
     db.get_all_contacts().map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Calendar commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_events(
+    state: State<'_, AppState>,
+) -> Result<Vec<StoredEvent>, String> {
+    let db = open_db(&state).await?;
+    db.get_events().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_events_in_range(
+    state: State<'_, AppState>,
+    start: i64,
+    end: i64,
+) -> Result<Vec<StoredEvent>, String> {
+    let db = open_db(&state).await?;
+    db.get_events_in_range(start, end).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_events_for_message(
+    state: State<'_, AppState>,
+    uid: u32,
+    folder: String,
+) -> Result<Vec<StoredEvent>, String> {
+    let db = open_db(&state).await?;
+    db.get_events_for_message(uid, &folder).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn respond_to_invite(
+    state: State<'_, AppState>,
+    event_uid: String,
+    response: String,
+) -> Result<(), String> {
+    let partstat = match response.as_str() {
+        "accepted" => "ACCEPTED",
+        "declined" => "DECLINED",
+        "tentative" => "TENTATIVE",
+        _ => return Err(format!("invalid response: {}", response)),
+    };
+
+    let db = open_db(&state).await?;
+    let event = db.get_event(&event_uid).map_err(|e| e.to_string())?;
+
+    let organizer = event
+        .organizer
+        .as_deref()
+        .ok_or_else(|| "event has no organizer".to_string())?
+        .to_string();
+
+    let id = get_active_id(&state).await?;
+    let (smtp_config, from_email) = {
+        let mgr = state.account_manager.lock().await;
+        let smtp = mgr.get_smtp_config(&id).map_err(|e| e.to_string())?;
+        let account = mgr.get_account(&id).map_err(|e| e.to_string())?;
+        (smtp, account.email.clone())
+    };
+
+    // Build the calendar event from the stored event for the reply builder
+    let cal_event = crate::calendar::parser::CalendarEvent {
+        event_uid: event.event_uid.clone(),
+        summary: event.summary.clone(),
+        dtstart: event.dtstart,
+        dtend: event.dtend,
+        location: event.location.clone(),
+        description: event.description.clone(),
+        organizer: event.organizer.clone(),
+        attendees: event.attendees.clone().unwrap_or_else(|| "[]".to_string()),
+        sequence: event.sequence,
+        method: None,
+        raw_ics: event.raw_ics.clone().unwrap_or_default(),
+    };
+
+    let ics_reply = build_ics_reply(&cal_event, &from_email, partstat);
+
+    let subject = format!(
+        "{}: {}",
+        response,
+        event.summary.as_deref().unwrap_or("Calendar Event")
+    );
+
+    let compose = ComposeEmail {
+        from: from_email,
+        to: vec![organizer],
+        cc: vec![],
+        bcc: vec![],
+        subject,
+        body_text: ics_reply,
+        body_html: None,
+        in_reply_to: None,
+        references: vec![],
+    };
+
+    crate::smtp::client::send_email(&smtp_config, &compose)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db.update_event_status(&event_uid, &response)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }

@@ -92,15 +92,96 @@ pub async fn sync_folder(
 
     // 5. Parse and store each fetched message
     for fetch in &fetches {
-        if let Some(msg) = parse_fetched(fetch, folder_name) {
-            // Auto-extract contacts from From header
-            if let Some(ref from) = msg.from_addr {
-                let _ = db.upsert_contact(from, None);
-            }
+        let uid = match fetch.uid {
+            Some(u) => u,
+            None => continue,
+        };
 
-            // Store message
-            db.upsert_message(&msg)
-                .map_err(|e| ImapError::Imap(format!("upsert_message: {}", e)))?;
+        // Combine header + text for full parsing
+        let header_bytes = fetch.header().unwrap_or_default();
+        let text_bytes = fetch.text().unwrap_or_default();
+        let mut raw = Vec::with_capacity(header_bytes.len() + 2 + text_bytes.len());
+        raw.extend_from_slice(header_bytes);
+        if !header_bytes.is_empty() && !header_bytes.ends_with(b"\r\n\r\n") {
+            raw.extend_from_slice(b"\r\n");
+        }
+        raw.extend_from_slice(text_bytes);
+
+        let parsed_email = match parse_email(&raw) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("failed to parse message UID {}: {}", uid, e);
+                // Still store a minimal message
+                let msg = Message {
+                    uid,
+                    message_id: None,
+                    folder: folder_name.to_string(),
+                    subject: None,
+                    from_addr: None,
+                    to_addr: None,
+                    cc: None,
+                    date: fetch.internal_date().map(|d| d.to_rfc3339()),
+                    body_text: None,
+                    body_html: None,
+                    flags: Some(format_flags(fetch)),
+                    thread_id: None,
+                    ref_headers: None,
+                    in_reply_to: None,
+                };
+                db.upsert_message(&msg)
+                    .map_err(|e| ImapError::Imap(format!("upsert_message: {}", e)))?;
+                continue;
+            }
+        };
+
+        // Build the Message struct from parsed email
+        let date = parsed_email
+            .date
+            .or_else(|| fetch.internal_date().map(|d| d.to_rfc3339()));
+        let ref_headers = if parsed_email.references.is_empty() {
+            None
+        } else {
+            Some(parsed_email.references.join(" "))
+        };
+
+        let msg = Message {
+            uid,
+            message_id: parsed_email.message_id,
+            folder: folder_name.to_string(),
+            subject: parsed_email.subject,
+            from_addr: parsed_email.from,
+            to_addr: parsed_email.to,
+            cc: parsed_email.cc,
+            date,
+            body_text: parsed_email.body_text,
+            body_html: parsed_email.body_html,
+            flags: Some(format_flags(fetch)),
+            thread_id: None,
+            ref_headers,
+            in_reply_to: parsed_email.in_reply_to,
+        };
+
+        // Auto-extract contacts from From header
+        if let Some(ref from) = msg.from_addr {
+            let _ = db.upsert_contact(from, None);
+        }
+
+        // Store message
+        db.upsert_message(&msg)
+            .map_err(|e| ImapError::Imap(format!("upsert_message: {}", e)))?;
+
+        // Detect and store calendar events from ICS parts
+        if !parsed_email.calendar_data.is_empty() {
+            for ics_data in &parsed_email.calendar_data {
+                let cal_events = crate::calendar::parser::parse_ics(ics_data);
+                for cal_event in &cal_events {
+                    let status = match cal_event.method.as_deref() {
+                        Some("CANCEL") => "cancelled",
+                        _ => "needs-action",
+                    };
+                    let _ = db.upsert_event(cal_event, uid, folder_name, status);
+                }
+            }
         }
     }
 
@@ -134,6 +215,7 @@ pub async fn sync_folder(
 // ---------------------------------------------------------------------------
 
 /// Parse a single IMAP FETCH response into a domain `Message`.
+#[allow(dead_code)]
 fn parse_fetched(fetch: &async_imap::types::Fetch, folder: &str) -> Option<Message> {
     let uid = fetch.uid?;
 

@@ -36,6 +36,7 @@ pub struct ParsedEmail {
     pub attachments: Vec<Attachment>,
     pub inline_images: Vec<InlineImage>,
     pub raw_headers: String,
+    pub calendar_data: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
     let mut body_html = None;
     let mut attachments = Vec::new();
     let mut inline_images = Vec::new();
+    let mut calendar_data = Vec::new();
 
     extract_parts(
         &parsed,
@@ -80,6 +82,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
         &mut body_html,
         &mut attachments,
         &mut inline_images,
+        &mut calendar_data,
     );
 
     Ok(ParsedEmail {
@@ -96,6 +99,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
         attachments,
         inline_images,
         raw_headers,
+        calendar_data,
     })
 }
 
@@ -130,12 +134,13 @@ fn extract_parts(
     body_html: &mut Option<String>,
     attachments: &mut Vec<Attachment>,
     inline_images: &mut Vec<InlineImage>,
+    calendar_data: &mut Vec<String>,
 ) {
     let content_type = part.ctype.mimetype.to_lowercase();
 
     if !part.subparts.is_empty() {
         for sub in &part.subparts {
-            extract_parts(sub, body_text, body_html, attachments, inline_images);
+            extract_parts(sub, body_text, body_html, attachments, inline_images, calendar_data);
         }
         return;
     }
@@ -148,7 +153,11 @@ fn extract_parts(
         .unwrap_or_default()
         .to_lowercase();
 
-    if content_type == "text/plain" && body_text.is_none() {
+    if content_type == "text/calendar" {
+        if let Ok(body) = part.get_body() {
+            calendar_data.push(body);
+        }
+    } else if content_type == "text/plain" && body_text.is_none() {
         if let Ok(body) = part.get_body() {
             *body_text = Some(body);
         }
