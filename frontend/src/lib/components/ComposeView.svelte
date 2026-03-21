@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import AddressInput from './AddressInput.svelte';
   import { selectedMessage, type Message } from '$lib/stores/messages';
-  import { mode } from '$lib/stores/ui';
+  import { mode, templateInsert } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
 
   export let replyMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
@@ -84,6 +84,22 @@
   let currentMessage: Message | null = null;
   const unsubMessage = selectedMessage.subscribe((msg) => {
     currentMessage = msg;
+  });
+
+  const unsubTemplate = templateInsert.subscribe((text) => {
+    if (text !== null) {
+      if (textareaEl) {
+        const start = textareaEl.selectionStart;
+        body = body.slice(0, start) + text + body.slice(start);
+        setTimeout(() => {
+          textareaEl.selectionStart = textareaEl.selectionEnd = start + text.length;
+          textareaEl.focus();
+        }, 0);
+      } else {
+        body += text;
+      }
+      templateInsert.set(null);
+    }
   });
 
   function stripSubjectPrefix(subj: string | null): string {
@@ -214,6 +230,7 @@
 
   onDestroy(() => {
     unsubMessage();
+    unsubTemplate();
     if (saveTimer) {
       clearInterval(saveTimer);
       saveTimer = null;

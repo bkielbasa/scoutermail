@@ -275,6 +275,12 @@ impl Database {
                 reply_mode  TEXT NOT NULL DEFAULT 'compose',
                 updated_at  INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS templates (
+                template_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE,
+                body        TEXT NOT NULL DEFAULT ''
+            );
             ",
         )?;
 
@@ -1154,6 +1160,69 @@ impl Database {
             )
             .map(|c| c > 0)
             .unwrap_or(false)
+    }
+
+    // -----------------------------------------------------------------------
+    // Template CRUD
+    // -----------------------------------------------------------------------
+
+    pub fn save_template(&self, name: &str, body: &str) -> Result<i64, StoreError> {
+        self.conn.execute(
+            "INSERT INTO templates (name, body) VALUES (?1, ?2)
+             ON CONFLICT(name) DO UPDATE SET body = excluded.body",
+            params![name, body],
+        )?;
+        let id = self.conn.query_row(
+            "SELECT template_id FROM templates WHERE name = ?1",
+            params![name],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(id)
+    }
+
+    pub fn get_template(&self, name: &str) -> Result<(i64, String, String), StoreError> {
+        self.conn
+            .query_row(
+                "SELECT template_id, name, body FROM templates WHERE name = ?1",
+                params![name],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound,
+                other => StoreError::Db(other),
+            })
+    }
+
+    pub fn get_templates(&self) -> Result<Vec<(i64, String, String)>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT template_id, name, body FROM templates ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut templates = Vec::new();
+        for row in rows {
+            templates.push(row?);
+        }
+        Ok(templates)
+    }
+
+    pub fn delete_template(&self, name: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM templates WHERE name = ?1",
+            params![name],
+        )?;
+        Ok(())
     }
 
     pub fn get_events_for_message(

@@ -853,3 +853,45 @@ pub async fn get_messages_by_label(
     db.get_messages_by_label(label_id)
         .map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Template commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn save_template(
+    state: State<'_, AppState>,
+    name: String,
+    body: String,
+) -> Result<i64, String> {
+    let db = open_db(&state).await?;
+    db.save_template(&name, &body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_template(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(String, String), String> {
+    let db = open_db(&state).await?;
+    let (_id, name, body) = db.get_template(&name).map_err(|e| e.to_string())?;
+    Ok((name, body))
+}
+
+#[tauri::command]
+pub async fn get_templates(
+    state: State<'_, AppState>,
+) -> Result<Vec<(String, String)>, String> {
+    let db = open_db(&state).await?;
+    let templates = db.get_templates().map_err(|e| e.to_string())?;
+    Ok(templates.into_iter().map(|(_id, name, body)| (name, body)).collect())
+}
+
+#[tauri::command]
+pub async fn delete_template(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.delete_template(&name).map_err(|e| e.to_string())
+}

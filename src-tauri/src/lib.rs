@@ -93,6 +93,10 @@ pub fn run() {
             commands::unlabel_message,
             commands::get_message_labels,
             commands::get_messages_by_label,
+            commands::save_template,
+            commands::get_template,
+            commands::get_templates,
+            commands::delete_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

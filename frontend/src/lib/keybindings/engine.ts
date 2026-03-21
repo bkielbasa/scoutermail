@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { mode, commandInput, searchOpen, helpOpen } from '$lib/stores/ui';
+import { mode, commandInput, searchOpen, helpOpen, commandSuggestions } from '$lib/stores/ui';
 import type { Mode } from '$lib/stores/ui';
 
 export type Action = string;
@@ -11,6 +11,13 @@ export interface Binding {
   mode: Mode;
   description: string;
 }
+
+const KNOWN_COMMANDS = [
+  'move', 'label', 'unlabel', 'labeled', 'filter',
+  'contacts', 'calendar', 'folders', 'drafts',
+  'signature', 'spam', 'print', 'snooze', 'unified',
+  'template', 'set',
+];
 
 const handlers = new Map<Action, KeyHandler>();
 let bindings: Binding[] = [];
@@ -69,10 +76,22 @@ function keyName(event: KeyboardEvent): string {
   return event.key;
 }
 
+function updateCommandSuggestions(): void {
+  const input = get(commandInput);
+  // Only show suggestions for the command name portion (before first space)
+  if (input && !input.includes(' ')) {
+    const matches = KNOWN_COMMANDS.filter((c) => c.startsWith(input));
+    commandSuggestions.set(matches);
+  } else {
+    commandSuggestions.set([]);
+  }
+}
+
 function handleCommandMode(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     event.preventDefault();
     commandInput.set('');
+    commandSuggestions.set([]);
     mode.set('NORMAL');
     return;
   }
@@ -81,8 +100,32 @@ function handleCommandMode(event: KeyboardEvent): void {
     event.preventDefault();
     const cmd = get(commandInput);
     commandInput.set('');
+    commandSuggestions.set([]);
     mode.set('NORMAL');
     executeCommand(cmd);
+    return;
+  }
+
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    const input = get(commandInput);
+    if (!input || input.includes(' ')) return;
+
+    const matches = KNOWN_COMMANDS.filter((c) => c.startsWith(input));
+    if (matches.length === 1) {
+      commandInput.set(matches[0] + ' ');
+      commandSuggestions.set([]);
+    } else if (matches.length > 1) {
+      // Find longest common prefix
+      let prefix = matches[0];
+      for (const m of matches) {
+        while (!m.startsWith(prefix)) {
+          prefix = prefix.slice(0, -1);
+        }
+      }
+      commandInput.set(prefix);
+      commandSuggestions.set(matches);
+    }
     return;
   }
 
@@ -90,9 +133,11 @@ function handleCommandMode(event: KeyboardEvent): void {
     event.preventDefault();
     const current = get(commandInput);
     if (current.length === 0) {
+      commandSuggestions.set([]);
       mode.set('NORMAL');
     } else {
       commandInput.set(current.slice(0, -1));
+      updateCommandSuggestions();
     }
     return;
   }
@@ -101,6 +146,7 @@ function handleCommandMode(event: KeyboardEvent): void {
   if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
     event.preventDefault();
     commandInput.update((v) => v + event.key);
+    updateCommandSuggestions();
   }
 }
 

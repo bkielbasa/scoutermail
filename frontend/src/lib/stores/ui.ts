@@ -12,3 +12,5 @@ export const helpOpen = writable(false);
 export const unifiedMode = writable(false);
 export const loading = writable(false);
 export const readingFontSize = writable(13);
+export const templateInsert = writable<string | null>(null);
+export const commandSuggestions = writable<string[]>([]);

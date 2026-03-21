@@ -19,7 +19,7 @@
   import { showToast } from '$lib/stores/toast';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
   import { defaultBindings } from '$lib/keybindings/bindings';
-  import { searchOpen, helpOpen, mode, unifiedMode } from '$lib/stores/ui';
+  import { searchOpen, helpOpen, mode, unifiedMode, templateInsert } from '$lib/stores/ui';
   import { accounts, activeAccount, activeFolder, type Account } from '$lib/stores/accounts';
   import { syncFolder, loadMessages, loadUnifiedMessages, selectedMessage, messages, filteredMessages, visualSelection, refreshFolderCounts, activeFilter, selectedIndex, type FilterType } from '$lib/stores/messages';
 
@@ -359,6 +359,39 @@
       else if (filter === 'starred') activeFilter.set('starred');
       else activeFilter.set('all');
       selectedIndex.set(0);
+    });
+
+    // Template commands
+    registerHandler('cmd:template', async (args?: string) => {
+      if (!args) return;
+      const parts = args.trim().split(/\s+/);
+
+      if (parts[0] === 'save' && parts[1]) {
+        const name = parts[1];
+        const body = parts.slice(2).join(' ');
+        if (body) {
+          await invoke('save_template', { name, body });
+          showToast(`Template "${name}" saved`, 'success');
+        } else {
+          showToast('Usage: :template save <name> <body text>', 'error');
+        }
+      } else if (parts[0] === 'list') {
+        const templates = await invoke<Array<[string, string]>>('get_templates');
+        const names = templates.map(([name]) => name).join(', ');
+        showToast(`Templates: ${names || '(none)'}`, 'info');
+      } else if (parts[0] === 'delete' && parts[1]) {
+        await invoke('delete_template', { name: parts[1] });
+        showToast(`Template "${parts[1]}" deleted`, 'success');
+      } else {
+        // Insert template by name
+        const name = parts[0];
+        try {
+          const [, body] = await invoke<[string, string]>('get_template', { name });
+          templateInsert.set(body);
+        } catch {
+          showToast(`Template "${name}" not found`, 'error');
+        }
+      }
     });
 
     // Mark unread
