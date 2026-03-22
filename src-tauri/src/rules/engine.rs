@@ -256,6 +256,171 @@ pub fn run_rules_on_messages(db: &Database, messages: &[Message]) -> Vec<String>
     all_logs
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_message() -> Message {
+        Message {
+            uid: 1,
+            message_id: Some("<test@example.com>".to_string()),
+            folder: "INBOX".to_string(),
+            subject: Some("Meeting tomorrow".to_string()),
+            from_addr: Some("alice@example.com".to_string()),
+            to_addr: Some("bob@example.com".to_string()),
+            cc: None,
+            date: Some("2026-01-15T10:00:00Z".to_string()),
+            body_text: Some("Let's meet at 10am in the office".to_string()),
+            body_html: None,
+            flags: Some("\\Seen".to_string()),
+            thread_id: None,
+            ref_headers: None,
+            in_reply_to: None,
+            reply_to: None,
+        }
+    }
+
+    #[test]
+    fn test_condition_contains() {
+        let msg = test_message();
+        let conditions = vec![Condition {
+            field: "from".to_string(),
+            op: "contains".to_string(),
+            value: "alice".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+
+        // Case-insensitive
+        let conditions = vec![Condition {
+            field: "from".to_string(),
+            op: "contains".to_string(),
+            value: "ALICE".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_condition_regex() {
+        let msg = test_message();
+        let conditions = vec![Condition {
+            field: "subject".to_string(),
+            op: "regex".to_string(),
+            value: r"Meeting\s+\w+".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+
+        // Non-matching regex
+        let conditions = vec![Condition {
+            field: "subject".to_string(),
+            op: "regex".to_string(),
+            value: r"^\d+$".to_string(),
+        }];
+        assert!(!matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_condition_not_contains() {
+        let msg = test_message();
+        let conditions = vec![Condition {
+            field: "from".to_string(),
+            op: "not_contains".to_string(),
+            value: "charlie".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+
+        // Should fail when value IS present
+        let conditions = vec![Condition {
+            field: "from".to_string(),
+            op: "not_contains".to_string(),
+            value: "alice".to_string(),
+        }];
+        assert!(!matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_multiple_conditions_all_must_match() {
+        let msg = test_message();
+
+        // Both true
+        let conditions = vec![
+            Condition {
+                field: "from".to_string(),
+                op: "contains".to_string(),
+                value: "alice".to_string(),
+            },
+            Condition {
+                field: "subject".to_string(),
+                op: "contains".to_string(),
+                value: "meeting".to_string(),
+            },
+        ];
+        assert!(matches_conditions(&msg, &conditions));
+
+        // One false -> overall false
+        let conditions = vec![
+            Condition {
+                field: "from".to_string(),
+                op: "contains".to_string(),
+                value: "alice".to_string(),
+            },
+            Condition {
+                field: "subject".to_string(),
+                op: "contains".to_string(),
+                value: "nonexistent".to_string(),
+            },
+        ];
+        assert!(!matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_condition_equals() {
+        let msg = test_message();
+        let conditions = vec![Condition {
+            field: "from".to_string(),
+            op: "equals".to_string(),
+            value: "alice@example.com".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+
+        // Case-insensitive equals
+        let conditions = vec![Condition {
+            field: "from".to_string(),
+            op: "equals".to_string(),
+            value: "Alice@Example.COM".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_condition_body_field() {
+        let msg = test_message();
+        let conditions = vec![Condition {
+            field: "body".to_string(),
+            op: "contains".to_string(),
+            value: "office".to_string(),
+        }];
+        assert!(matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_unknown_field_returns_false() {
+        let msg = test_message();
+        let conditions = vec![Condition {
+            field: "nonexistent".to_string(),
+            op: "contains".to_string(),
+            value: "anything".to_string(),
+        }];
+        assert!(!matches_conditions(&msg, &conditions));
+    }
+
+    #[test]
+    fn test_empty_conditions_matches_all() {
+        let msg = test_message();
+        let conditions: Vec<Condition> = vec![];
+        assert!(matches_conditions(&msg, &conditions));
+    }
+}
+
 /// Async version that also handles webhook/shell/ai_prompt actions.
 pub async fn run_rules_on_messages_async(db: &Database, messages: &[Message]) -> Vec<String> {
     let rules = match db.get_enabled_rules() {

@@ -1738,6 +1738,308 @@ mod tests {
     }
 
     #[test]
+    fn test_events_crud() {
+        let db = test_db();
+        // Need a message first for foreign-key-like semantics
+        let msg = sample_message(1, "INBOX");
+        db.upsert_message(&msg).unwrap();
+
+        let event = crate::calendar::parser::CalendarEvent {
+            event_uid: "evt-1@example.com".to_string(),
+            summary: Some("Team Meeting".to_string()),
+            dtstart: 1774432800,
+            dtend: Some(1774436400),
+            location: Some("Room A".to_string()),
+            description: Some("Weekly sync".to_string()),
+            organizer: Some("alice@example.com".to_string()),
+            attendees: "[]".to_string(),
+            sequence: 0,
+            method: Some("REQUEST".to_string()),
+            raw_ics: "BEGIN:VCALENDAR...".to_string(),
+        };
+
+        db.upsert_event(&event, 1, "INBOX", "needs-action").unwrap();
+
+        // get_events
+        let events = db.get_events().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_uid, "evt-1@example.com");
+        assert_eq!(events[0].summary.as_deref(), Some("Team Meeting"));
+        assert_eq!(events[0].status, "needs-action");
+
+        // get_event
+        let ev = db.get_event("evt-1@example.com").unwrap();
+        assert_eq!(ev.dtstart, 1774432800);
+        assert_eq!(ev.location.as_deref(), Some("Room A"));
+
+        // update_event_status
+        db.update_event_status("evt-1@example.com", "accepted").unwrap();
+        let ev = db.get_event("evt-1@example.com").unwrap();
+        assert_eq!(ev.status, "accepted");
+
+        // get_event for non-existent returns NotFound
+        let result = db.get_event("nonexistent");
+        assert!(matches!(result, Err(StoreError::NotFound)));
+    }
+
+    #[test]
+    fn test_labels_crud() {
+        let db = test_db();
+        let msg = sample_message(1, "INBOX");
+        db.upsert_message(&msg).unwrap();
+
+        // Create label
+        let label_id = db.create_label("Important", "").unwrap();
+        assert!(label_id > 0);
+
+        // Get labels
+        let labels = db.get_labels().unwrap();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].name, "Important");
+
+        // Add label to message
+        db.add_label_to_message(1, "INBOX", label_id).unwrap();
+
+        // Get labels for message
+        let msg_labels = db.get_labels_for_message(1, "INBOX").unwrap();
+        assert_eq!(msg_labels.len(), 1);
+        assert_eq!(msg_labels[0].name, "Important");
+
+        // Get messages by label
+        let msgs = db.get_messages_by_label(label_id).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].uid, 1);
+
+        // Remove label from message
+        db.remove_label_from_message(1, "INBOX", label_id).unwrap();
+        let msg_labels = db.get_labels_for_message(1, "INBOX").unwrap();
+        assert_eq!(msg_labels.len(), 0);
+
+        // Messages by label should now be empty
+        let msgs = db.get_messages_by_label(label_id).unwrap();
+        assert_eq!(msgs.len(), 0);
+    }
+
+    #[test]
+    fn test_drafts_crud() {
+        let db = test_db();
+
+        let draft = Draft {
+            draft_id: None,
+            to_addr: "bob@example.com".to_string(),
+            cc: "".to_string(),
+            bcc: "".to_string(),
+            subject: "Test Draft".to_string(),
+            body: "Draft body".to_string(),
+            in_reply_to: None,
+            ref_headers: None,
+            reply_mode: "compose".to_string(),
+            updated_at: 1000,
+        };
+
+        // Save draft
+        let id = db.save_draft(&draft).unwrap();
+        assert!(id > 0);
+
+        // Get drafts
+        let drafts = db.get_drafts().unwrap();
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].subject, "Test Draft");
+
+        // Get draft by id
+        let d = db.get_draft(id).unwrap();
+        assert_eq!(d.to_addr, "bob@example.com");
+        assert_eq!(d.body, "Draft body");
+
+        // Update draft
+        let updated = Draft {
+            draft_id: Some(id),
+            to_addr: "carol@example.com".to_string(),
+            cc: "".to_string(),
+            bcc: "".to_string(),
+            subject: "Updated Draft".to_string(),
+            body: "Updated body".to_string(),
+            in_reply_to: None,
+            ref_headers: None,
+            reply_mode: "compose".to_string(),
+            updated_at: 2000,
+        };
+        let same_id = db.save_draft(&updated).unwrap();
+        assert_eq!(same_id, id);
+
+        let d = db.get_draft(id).unwrap();
+        assert_eq!(d.subject, "Updated Draft");
+
+        // Delete draft
+        db.delete_draft(id).unwrap();
+        let result = db.get_draft(id);
+        assert!(matches!(result, Err(StoreError::NotFound)));
+    }
+
+    #[test]
+    fn test_scheduled_crud() {
+        let db = test_db();
+
+        let email = ScheduledEmail {
+            schedule_id: None,
+            to_addr: "bob@example.com".to_string(),
+            cc: "".to_string(),
+            bcc: "".to_string(),
+            subject: "Scheduled".to_string(),
+            body_text: "Hello".to_string(),
+            body_html: None,
+            in_reply_to: None,
+            ref_headers: None,
+            send_at: 5000,
+        };
+
+        let id = db.schedule_email(&email).unwrap();
+        assert!(id > 0);
+
+        // Not yet due
+        let due = db.get_due_scheduled(4999).unwrap();
+        assert_eq!(due.len(), 0);
+
+        // Now due
+        let due = db.get_due_scheduled(5000).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].subject, "Scheduled");
+
+        // Get all scheduled
+        let all = db.get_scheduled().unwrap();
+        assert_eq!(all.len(), 1);
+
+        // Delete
+        db.delete_scheduled(id).unwrap();
+        let all = db.get_scheduled().unwrap();
+        assert_eq!(all.len(), 0);
+    }
+
+    #[test]
+    fn test_rules_crud() {
+        let db = test_db();
+
+        let rule = Rule {
+            rule_id: None,
+            name: "Auto-label".to_string(),
+            enabled: true,
+            conditions: r#"[{"field":"from","op":"contains","value":"alice"}]"#.to_string(),
+            actions: r#"[{"type":"add_label","value":"Alice"}]"#.to_string(),
+            created_at: 1000,
+        };
+
+        // Save rule
+        let id = db.save_rule(&rule).unwrap();
+        assert!(id > 0);
+
+        // Get rules
+        let rules = db.get_rules().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].name, "Auto-label");
+        assert!(rules[0].enabled);
+
+        // Toggle rule off
+        db.toggle_rule(id, false).unwrap();
+        let r = db.get_rule(id).unwrap();
+        assert!(!r.enabled);
+
+        // Enabled rules should be empty
+        let enabled = db.get_enabled_rules().unwrap();
+        assert_eq!(enabled.len(), 0);
+
+        // Toggle back on
+        db.toggle_rule(id, true).unwrap();
+        let enabled = db.get_enabled_rules().unwrap();
+        assert_eq!(enabled.len(), 1);
+
+        // Delete rule
+        db.delete_rule(id).unwrap();
+        let rules = db.get_rules().unwrap();
+        assert_eq!(rules.len(), 0);
+    }
+
+    #[test]
+    fn test_pagination() {
+        let db = test_db();
+
+        // Insert 10 messages with different dates for ordering
+        for i in 1..=10u32 {
+            let mut msg = sample_message(i, "INBOX");
+            msg.date = Some(format!("2026-01-{:02}T10:00:00Z", i));
+            msg.subject = Some(format!("Message {}", i));
+            db.upsert_message(&msg).unwrap();
+        }
+
+        // Total count
+        let count = db.get_message_count("INBOX").unwrap();
+        assert_eq!(count, 10);
+
+        // Page 1: limit=3, offset=0
+        let page1 = db.get_messages_by_folder_paged("INBOX", 3, 0).unwrap();
+        assert_eq!(page1.len(), 3);
+        // Ordered by date DESC, so message 10, 9, 8
+        assert_eq!(page1[0].uid, 10);
+        assert_eq!(page1[1].uid, 9);
+        assert_eq!(page1[2].uid, 8);
+
+        // Page 2: limit=3, offset=3
+        let page2 = db.get_messages_by_folder_paged("INBOX", 3, 3).unwrap();
+        assert_eq!(page2.len(), 3);
+        assert_eq!(page2[0].uid, 7);
+
+        // Page 4: limit=3, offset=9 — only 1 message left
+        let page4 = db.get_messages_by_folder_paged("INBOX", 3, 9).unwrap();
+        assert_eq!(page4.len(), 1);
+        assert_eq!(page4[0].uid, 1);
+
+        // Beyond range
+        let empty = db.get_messages_by_folder_paged("INBOX", 3, 10).unwrap();
+        assert_eq!(empty.len(), 0);
+    }
+
+    #[test]
+    fn test_settings() {
+        let db = test_db();
+
+        // Initially no setting
+        let val = db.get_setting("theme").unwrap();
+        assert!(val.is_none());
+
+        // Set
+        db.set_setting("theme", "dark").unwrap();
+        let val = db.get_setting("theme").unwrap();
+        assert_eq!(val.as_deref(), Some("dark"));
+
+        // Overwrite
+        db.set_setting("theme", "light").unwrap();
+        let val = db.get_setting("theme").unwrap();
+        assert_eq!(val.as_deref(), Some("light"));
+    }
+
+    #[test]
+    fn test_backup() {
+        let db = test_db();
+        let msg = sample_message(1, "INBOX");
+        db.upsert_message(&msg).unwrap();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let backup_path = tmp.path().to_str().unwrap().to_string();
+        // Remove the temp file so VACUUM INTO can create it
+        drop(tmp);
+
+        db.backup(&backup_path).unwrap();
+
+        // Open the backup and verify data
+        let backup_db = Database::open(&backup_path).unwrap();
+        let fetched = backup_db.get_message(1, "INBOX").unwrap();
+        assert_eq!(fetched.uid, 1);
+        assert_eq!(fetched.subject.as_deref(), Some("Test subject"));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&backup_path);
+    }
+
+    #[test]
     fn test_contact_upsert_frequency_increment() {
         let db = test_db();
 

@@ -8,6 +8,7 @@
   import ReadingPane from '$lib/components/ReadingPane.svelte';
   import ComposeView from '$lib/components/ComposeView.svelte';
   import AccountSetup from '$lib/components/AccountSetup.svelte';
+  import Onboarding from '$lib/components/Onboarding.svelte';
   import SearchBar from '$lib/components/SearchBar.svelte';
   import HelpOverlay from '$lib/components/HelpOverlay.svelte';
   import ContactsList from '$lib/components/ContactsList.svelte';
@@ -34,6 +35,7 @@
   let showSignatureEditor = false;
   let initialDraft: any = null;
   let hasAccounts = false;
+  let showOnboarding = false;
   let isSearchOpen = false;
   let isHelpOpen = false;
 
@@ -90,6 +92,27 @@
     composeMode = draft.reply_mode || 'compose';
     composing = true;
     showDrafts = false;
+  }
+
+  async function checkOnboarding(): Promise<void> {
+    try {
+      const done = await invoke<string | null>('get_setting', { key: 'onboarding_done' });
+      if (!done) {
+        showOnboarding = true;
+      }
+    } catch {
+      // Setting not found means first run
+      showOnboarding = true;
+    }
+  }
+
+  async function dismissOnboarding(): Promise<void> {
+    showOnboarding = false;
+    try {
+      await invoke('set_setting', { key: 'onboarding_done', value: 'true' });
+    } catch (e) {
+      console.warn('Failed to save onboarding setting:', e);
+    }
   }
 
   async function initAccounts(): Promise<void> {
@@ -442,6 +465,7 @@
       });
     }
 
+    checkOnboarding();
     initAccounts();
 
     // Background sync every 5 minutes
@@ -498,7 +522,9 @@
 </script>
 
 <div id="app">
-  {#if !hasAccounts}
+  {#if showOnboarding}
+    <Onboarding on:done={dismissOnboarding} />
+  {:else if !hasAccounts}
     <AccountSetup on:done={handleSetupDone} />
   {:else}
     <StatusBar />

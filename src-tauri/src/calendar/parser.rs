@@ -295,6 +295,69 @@ END:VCALENDAR\r\n";
     }
 
     #[test]
+    fn test_parse_ics_cancel() {
+        let ics = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Test//Test//EN\r\n\
+METHOD:CANCEL\r\n\
+BEGIN:VEVENT\r\n\
+UID:cancel-uid-456@example.com\r\n\
+SUMMARY:Cancelled Meeting\r\n\
+DTSTART:20260401T140000Z\r\n\
+SEQUENCE:1\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_ics(ics);
+        assert_eq!(events.len(), 1);
+        let ev = &events[0];
+        assert_eq!(ev.event_uid, "cancel-uid-456@example.com");
+        assert_eq!(ev.method.as_deref(), Some("CANCEL"));
+        assert_eq!(ev.summary.as_deref(), Some("Cancelled Meeting"));
+        assert_eq!(ev.sequence, 1);
+    }
+
+    #[test]
+    fn test_build_reply_accepted() {
+        let events = parse_ics(SAMPLE_ICS);
+        let ev = &events[0];
+        let reply = build_ics_reply(ev, "bob@example.com", "ACCEPTED");
+
+        assert!(reply.contains("METHOD:REPLY"));
+        assert!(reply.contains("PARTSTAT=ACCEPTED"));
+        assert!(reply.contains("mailto:bob@example.com"));
+        assert!(reply.contains("PRODID:-//ScouterMail//EN"));
+        // Should contain the original event UID
+        assert!(reply.contains("UID:test-uid-123@example.com"));
+    }
+
+    #[test]
+    fn test_build_reply_declined() {
+        let events = parse_ics(SAMPLE_ICS);
+        let ev = &events[0];
+        let reply = build_ics_reply(ev, "bob@example.com", "DECLINED");
+
+        assert!(reply.contains("PARTSTAT=DECLINED"));
+    }
+
+    #[test]
+    fn test_parse_ics_no_uid_skipped() {
+        // Event without UID should be skipped
+        let ics = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+SUMMARY:No UID Event\r\n\
+DTSTART:20260401T140000Z\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_ics(ics);
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
     fn test_build_ics_reply() {
         let events = parse_ics(SAMPLE_ICS);
         let ev = &events[0];
