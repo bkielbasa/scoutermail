@@ -180,6 +180,7 @@ pub struct UnifiedMessage {
     pub ref_headers: Option<String>,
     pub in_reply_to: Option<String>,
     pub reply_to: Option<String>,
+    pub list_unsubscribe: Option<String>,
 }
 
 #[tauri::command]
@@ -215,6 +216,7 @@ pub async fn get_unified_messages(
                         ref_headers: msg.ref_headers,
                         in_reply_to: msg.in_reply_to,
                         reply_to: msg.reply_to,
+                        list_unsubscribe: msg.list_unsubscribe,
                     });
                 }
             }

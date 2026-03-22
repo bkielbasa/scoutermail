@@ -8,6 +8,7 @@
   } from '$lib/stores/messages';
   import { focusPane, readingFontSize } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
+  import { open } from '@tauri-apps/plugin-shell';
   import InviteCard from './InviteCard.svelte';
   import AttachmentList from './AttachmentList.svelte';
 
@@ -108,6 +109,34 @@
     return lines.join('\n');
   }
 
+  function parseUnsubscribeUrl(header: string): { url: string; type: 'web' | 'email' } | null {
+    const matches = header.match(/<([^>]+)>/g);
+    if (!matches) return null;
+
+    const urls = matches.map(m => m.slice(1, -1));
+
+    const https = urls.find(u => u.startsWith('https://') || u.startsWith('http://'));
+    if (https) return { url: https, type: 'web' };
+
+    const mailto = urls.find(u => u.startsWith('mailto:'));
+    if (mailto) return { url: mailto, type: 'email' };
+
+    return null;
+  }
+
+  $: unsubscribeInfo = currentMessage?.list_unsubscribe
+    ? parseUnsubscribeUrl(currentMessage.list_unsubscribe)
+    : null;
+
+  async function handleUnsubscribe(): Promise<void> {
+    if (!unsubscribeInfo) return;
+    try {
+      await open(unsubscribeInfo.url);
+    } catch (e) {
+      console.error('Failed to open unsubscribe URL:', e);
+    }
+  }
+
   function toggleThread(uid: number): void {
     if (expandedUids.has(uid)) {
       expandedUids.delete(uid);
@@ -197,6 +226,12 @@
         <span class="meta-sep">&middot;</span>
         <span class="msg-date">{formatDate(currentMessage.date)}</span>
       </div>
+
+      {#if unsubscribeInfo}
+        <button class="unsubscribe-btn" on:click={handleUnsubscribe}>
+          Unsubscribe
+        </button>
+      {/if}
 
       {#if messageLabels.length > 0}
         <div class="label-chips">
@@ -351,6 +386,23 @@
   .msg-date {
     color: var(--text-dim);
     font-size: 12px;
+  }
+
+  .unsubscribe-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    margin-bottom: 12px;
+  }
+
+  .unsubscribe-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .label-chips {

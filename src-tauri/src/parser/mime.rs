@@ -38,6 +38,7 @@ pub struct ParsedEmail {
     pub inline_images: Vec<InlineImage>,
     pub raw_headers: String,
     pub calendar_data: Vec<String>,
+    pub list_unsubscribe: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
     let date = headers.get_first_value("Date");
     let in_reply_to = headers.get_first_value("In-Reply-To");
     let reply_to = headers.get_first_value("Reply-To");
+    let list_unsubscribe = headers.get_first_value("List-Unsubscribe");
 
     let references = headers
         .get_first_value("References")
@@ -103,6 +105,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
         inline_images,
         raw_headers,
         calendar_data,
+        list_unsubscribe,
     })
 }
 

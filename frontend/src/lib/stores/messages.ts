@@ -24,6 +24,7 @@ export interface Message {
   ref_headers: string | null;
   in_reply_to: string | null;
   reply_to: string | null;
+  list_unsubscribe: string | null;
   // Unified inbox fields (only present when in unified mode)
   account_id?: string;
   account_name?: string;

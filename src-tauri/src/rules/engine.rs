@@ -277,6 +277,7 @@ mod tests {
             ref_headers: None,
             in_reply_to: None,
             reply_to: None,
+            list_unsubscribe: None,
         }
     }
 
