@@ -14,7 +14,7 @@ export interface Binding {
 
 const KNOWN_COMMANDS = [
   'move', 'label', 'unlabel', 'labeled', 'filter',
-  'contacts', 'calendar', 'folders', 'drafts',
+  'contacts', 'calendar', 'folders', 'drafts', 'rules',
   'signature', 'spam', 'print', 'snooze', 'unified',
   'template', 'set',
 ];

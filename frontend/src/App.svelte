@@ -15,6 +15,7 @@
   import FolderList from '$lib/components/FolderList.svelte';
   import SignatureEditor from '$lib/components/SignatureEditor.svelte';
   import DraftsList from '$lib/components/DraftsList.svelte';
+  import RuleEditor from '$lib/components/RuleEditor.svelte';
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import { showToast } from '$lib/stores/toast';
   import { handleKeyDown, setBindings, registerHandler } from '$lib/keybindings/engine';
@@ -29,6 +30,7 @@
   let showCalendar = false;
   let showFolders = false;
   let showDrafts = false;
+  let showRules = false;
   let showSignatureEditor = false;
   let initialDraft: any = null;
   let hasAccounts = false;
@@ -67,6 +69,7 @@
     showContacts = false;
     showCalendar = false;
     showDrafts = false;
+    showRules = false;
     initialDraft = null;
   }
 
@@ -77,6 +80,7 @@
     showCalendar = false;
     showFolders = false;
     showDrafts = false;
+    showRules = false;
     await loadMessages(folder);
   }
 
@@ -148,6 +152,16 @@
       composing = false;
       showContacts = false;
       showFolders = false;
+    });
+
+    // :rules command
+    registerHandler('cmd:rules', () => {
+      showRules = true;
+      composing = false;
+      showContacts = false;
+      showCalendar = false;
+      showFolders = false;
+      showDrafts = false;
     });
 
     // :signature command
@@ -496,6 +510,8 @@
           <CalendarView />
         {:else if showContacts}
           <ContactsList />
+        {:else if showRules}
+          <RuleEditor />
         {:else}
           <ReadingPane />
         {/if}
