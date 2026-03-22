@@ -15,6 +15,8 @@ use crate::commands::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    env_logger::init();
+
     let data_dir = dirs::data_dir()
         .expect("could not determine data directory")
         .join("com.scoutermail");
@@ -45,7 +47,9 @@ pub fn run() {
                     {
                         return true;
                     }
-                    let _ = open::that(s);
+                    if let Err(e) = open::that(s) {
+                        log::error!("failed to open external URL {}: {}", s, e);
+                    }
                     false
                 })
                 .build(),
@@ -110,4 +114,6 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    log::info!("ScouterMail shutting down");
 }

@@ -296,7 +296,7 @@ pub async fn sync_folder(
                 SearchIndex::open(&idx_path).map_err(|e| e.to_string())?;
             let writer = search_index.writer().map_err(|e| e.to_string())?;
             for msg in &messages {
-                let _ = search_index.index_message(
+                if let Err(e) = search_index.index_message(
                     &writer,
                     msg.uid as i64,
                     &msg.folder,
@@ -304,7 +304,9 @@ pub async fn sync_folder(
                     msg.from_addr.as_deref().unwrap_or(""),
                     msg.to_addr.as_deref().unwrap_or(""),
                     msg.body_text.as_deref().unwrap_or(""),
-                );
+                ) {
+                    log::error!("failed to index message uid={}: {}", msg.uid, e);
+                }
             }
             search_index.commit(writer).map_err(|e| e.to_string())?;
 
@@ -314,7 +316,9 @@ pub async fn sync_folder(
                 log::info!("[rules] {}", entry);
             }
 
-            let _ = session.logout().await;
+            if let Err(e) = session.logout().await {
+                log::warn!("IMAP logout failed during sync: {}", e);
+            }
 
             Ok::<Vec<Message>, String>(messages)
         })
@@ -476,7 +480,7 @@ pub async fn update_flags(
 
     let folder_clone = folder.clone();
     let handle = tokio::runtime::Handle::current();
-    let _ = tokio::task::spawn_blocking(move || {
+    if let Err(e) = tokio::task::spawn_blocking(move || {
         handle.block_on(async move {
             let mut session = imap_client::connect_with_retry(&imap_config, 3)
                 .await
@@ -484,11 +488,16 @@ pub async fn update_flags(
             imap_client::set_flags(&mut session, uid, &folder_clone, &imap_flags_str)
                 .await
                 .map_err(|e| e.to_string())?;
-            let _ = session.logout().await;
+            if let Err(e) = session.logout().await {
+                log::warn!("IMAP logout failed during flag update: {}", e);
+            }
             Ok::<(), String>(())
         })
     })
-    .await;
+    .await
+    {
+        log::error!("failed to sync flags to IMAP: {}", e);
+    }
 
     Ok(())
 }
@@ -533,7 +542,9 @@ pub async fn move_message(
             imap_client::move_message(&mut session, uid, &from, &to)
                 .await
                 .map_err(|e| e.to_string())?;
-            let _ = session.logout().await;
+            if let Err(e) = session.logout().await {
+                log::warn!("IMAP logout failed during move: {}", e);
+            }
             Ok::<(), String>(())
         })
     })
@@ -800,8 +811,9 @@ pub async fn save_attachment(
     let (data, filename) = db
         .get_attachment_data(attachment_id)
         .map_err(|e| e.to_string())?;
-    let downloads =
-        dirs::download_dir().unwrap_or_else(|| dirs::home_dir().unwrap().join("Downloads"));
+    let downloads = dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
+        .ok_or_else(|| "cannot determine downloads directory".to_string())?;
     let target_name = filename.unwrap_or_else(|| "attachment".to_string());
     let path = downloads.join(&target_name);
     std::fs::write(&path, &data).map_err(|e| e.to_string())?;

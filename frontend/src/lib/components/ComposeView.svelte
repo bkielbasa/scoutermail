@@ -167,8 +167,9 @@
       setTimeout(() => {
         draftSavedIndicator = false;
       }, 2000);
-    } catch {
+    } catch (e) {
       // non-critical — draft save failure should not interrupt composing
+      console.warn('Draft save failed:', e);
     }
   }
 
@@ -181,8 +182,14 @@
     }
   }
 
+  function handleBeforeUnload() {
+    // Best-effort draft save when the window is closing
+    saveDraft();
+  }
+
   onMount(async () => {
     mode.set('INSERT');
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     const signature = await loadSignature();
     const sigBlock = signature ? `\n\n-- \n${signature}` : '';
@@ -231,10 +238,13 @@
   onDestroy(() => {
     unsubMessage();
     unsubTemplate();
+    window.removeEventListener('beforeunload', handleBeforeUnload);
     if (saveTimer) {
       clearInterval(saveTimer);
       saveTimer = null;
     }
+    // Save draft one last time on component destroy
+    saveDraft();
   });
 
   function parseAddresses(input: string): string[] {
@@ -269,8 +279,8 @@
       if (draftId) {
         try {
           await invoke('delete_draft', { draftId });
-        } catch {
-          // non-critical
+        } catch (e) {
+          console.warn('Failed to delete draft after send:', e);
         }
       }
       handleClose();

@@ -102,14 +102,15 @@
         await invoke('set_active_account', { id: accountList[0].id });
         try {
           await syncFolder('INBOX');
-        } catch {
+        } catch (e) {
           // Sync may fail if offline; messages may still be cached
+          console.warn('Initial sync failed, loading cached messages:', e);
           await loadMessages('INBOX');
         }
         await refreshFolderCounts();
       }
-    } catch {
-      // No accounts yet
+    } catch (e) {
+      console.warn('Failed to load accounts:', e);
     }
   }
 
@@ -478,7 +479,8 @@
     hasAccounts = true;
     try {
       await syncFolder('INBOX');
-    } catch {
+    } catch (e) {
+      console.warn('Post-setup sync failed, loading cached:', e);
       await loadMessages('INBOX');
     }
     await refreshFolderCounts();

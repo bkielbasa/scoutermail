@@ -16,13 +16,13 @@ pub enum KeychainError {
 /// Set the file path for password storage. Must be called before any other function.
 pub fn init(data_dir: &std::path::Path) {
     let path = data_dir.join("passwords.json");
-    *PASSWORDS_PATH.lock().unwrap() = Some(path);
+    *PASSWORDS_PATH.lock().expect("password store mutex poisoned") = Some(path);
 }
 
 fn passwords_path() -> PathBuf {
     PASSWORDS_PATH
         .lock()
-        .unwrap()
+        .expect("password store mutex poisoned")
         .clone()
         .expect("keychain::init() must be called first")
 }

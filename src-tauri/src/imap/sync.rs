@@ -165,7 +165,9 @@ pub async fn sync_folder(
 
         // Auto-extract contacts from From header
         if let Some(ref from) = msg.from_addr {
-            let _ = db.upsert_contact(from, None);
+            if let Err(e) = db.upsert_contact(from, None) {
+                warn!("failed to upsert contact '{}': {}", from, e);
+            }
         }
 
         // Store message
@@ -175,16 +177,20 @@ pub async fn sync_folder(
         // Store attachments
         if !parsed_email.attachments.is_empty() {
             // Remove old attachments for this message (in case of re-sync)
-            let _ = db.delete_attachments_for_message(uid, folder_name);
+            if let Err(e) = db.delete_attachments_for_message(uid, folder_name) {
+                warn!("failed to delete old attachments for uid={}: {}", uid, e);
+            }
             for att in &parsed_email.attachments {
-                let _ = db.insert_attachment(
+                if let Err(e) = db.insert_attachment(
                     uid,
                     folder_name,
                     Some(&att.filename),
                     Some(&att.content_type),
                     Some(att.size as i64),
                     &att.data,
-                );
+                ) {
+                    warn!("failed to insert attachment '{}' for uid={}: {}", att.filename, uid, e);
+                }
             }
         }
 
@@ -197,7 +203,9 @@ pub async fn sync_folder(
                         Some("CANCEL") => "cancelled",
                         _ => "needs-action",
                     };
-                    let _ = db.upsert_event(cal_event, uid, folder_name, status);
+                    if let Err(e) = db.upsert_event(cal_event, uid, folder_name, status) {
+                        warn!("failed to upsert calendar event '{}' for uid={}: {}", cal_event.event_uid, uid, e);
+                    }
                 }
             }
         }

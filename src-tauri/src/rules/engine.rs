@@ -74,8 +74,11 @@ pub fn execute_builtin_actions(
                                 .and_then(|labels| labels.iter().find(|l| l.name == *label_name).map(|l| l.label_id))
                         });
                     if let Some(lid) = label_id {
-                        let _ = db.add_label_to_message(msg.uid, &msg.folder, lid);
-                        log.push(format!("Added label '{}'", label_name));
+                        if let Err(e) = db.add_label_to_message(msg.uid, &msg.folder, lid) {
+                            log::error!("failed to add label '{}' to uid={}: {}", label_name, msg.uid, e);
+                        } else {
+                            log.push(format!("Added label '{}'", label_name));
+                        }
                     }
                 }
             }
@@ -83,8 +86,11 @@ pub fn execute_builtin_actions(
                 if let Some(label_name) = &action.value {
                     if let Ok(labels) = db.get_labels() {
                         if let Some(label) = labels.iter().find(|l| l.name == *label_name) {
-                            let _ = db.remove_label_from_message(msg.uid, &msg.folder, label.label_id);
-                            log.push(format!("Removed label '{}'", label_name));
+                            if let Err(e) = db.remove_label_from_message(msg.uid, &msg.folder, label.label_id) {
+                                log::error!("failed to remove label '{}' from uid={}: {}", label_name, msg.uid, e);
+                            } else {
+                                log.push(format!("Removed label '{}'", label_name));
+                            }
                         }
                     }
                 }
@@ -93,27 +99,39 @@ pub fn execute_builtin_actions(
                 let flags = msg.flags.as_deref().unwrap_or("");
                 if !flags.contains("Seen") {
                     let new_flags = format!("{} Seen", flags).trim().to_string();
-                    let _ = db.update_flags(msg.uid, &msg.folder, &new_flags);
-                    log.push("Marked as read".into());
+                    if let Err(e) = db.update_flags(msg.uid, &msg.folder, &new_flags) {
+                        log::error!("failed to mark uid={} as read: {}", msg.uid, e);
+                    } else {
+                        log.push("Marked as read".into());
+                    }
                 }
             }
             "mark_unread" => {
                 let flags = msg.flags.as_deref().unwrap_or("");
                 let new_flags = flags.replace("Seen", "").trim().to_string();
-                let _ = db.update_flags(msg.uid, &msg.folder, &new_flags);
-                log.push("Marked as unread".into());
+                if let Err(e) = db.update_flags(msg.uid, &msg.folder, &new_flags) {
+                    log::error!("failed to mark uid={} as unread: {}", msg.uid, e);
+                } else {
+                    log.push("Marked as unread".into());
+                }
             }
             "star" => {
                 let flags = msg.flags.as_deref().unwrap_or("");
                 if !flags.contains("Flagged") {
                     let new_flags = format!("{} Flagged", flags).trim().to_string();
-                    let _ = db.update_flags(msg.uid, &msg.folder, &new_flags);
-                    log.push("Starred".into());
+                    if let Err(e) = db.update_flags(msg.uid, &msg.folder, &new_flags) {
+                        log::error!("failed to star uid={}: {}", msg.uid, e);
+                    } else {
+                        log.push("Starred".into());
+                    }
                 }
             }
             "delete" => {
-                let _ = db.delete_message(msg.uid, &msg.folder);
-                log.push("Deleted".into());
+                if let Err(e) = db.delete_message(msg.uid, &msg.folder) {
+                    log::error!("failed to delete uid={}: {}", msg.uid, e);
+                } else {
+                    log.push("Deleted".into());
+                }
             }
             // webhook, shell, ai_prompt are handled separately (async)
             _ => {}
