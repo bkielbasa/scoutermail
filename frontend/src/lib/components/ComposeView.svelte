@@ -5,6 +5,7 @@
   import { selectedMessage, type Message } from '$lib/stores/messages';
   import { mode, templateInsert } from '$lib/stores/ui';
   import { registerHandler } from '$lib/keybindings/engine';
+  import { showToast } from '$lib/stores/toast';
 
   export let replyMode: 'compose' | 'reply' | 'reply-all' | 'forward' = 'compose';
   export let initialDraft: any = null;
@@ -26,6 +27,8 @@
   let saveTimer: ReturnType<typeof setInterval> | null = null;
   let draftSavedIndicator = false;
   let textareaEl: HTMLTextAreaElement;
+  let showScheduleInput = false;
+  let scheduleTime = '';
 
   function wrapSelection(before: string, after: string) {
     if (!textareaEl) return;
@@ -254,6 +257,62 @@
       .filter((s) => s.length > 0);
   }
 
+  async function handleSchedule(): Promise<void> {
+    if (!to.trim()) {
+      error = 'Recipient (To) is required.';
+      return;
+    }
+    if (!scheduleTime.trim()) {
+      error = 'Please enter a date/time for scheduling.';
+      return;
+    }
+
+    let sendAt: number;
+    const trimmed = scheduleTime.trim();
+    if (trimmed.startsWith('+')) {
+      // Relative: +60 means 60 minutes from now
+      const minutes = parseInt(trimmed.slice(1), 10);
+      if (isNaN(minutes) || minutes <= 0) {
+        error = 'Invalid relative time. Use +N where N is minutes from now.';
+        return;
+      }
+      sendAt = Math.floor(Date.now() / 1000) + minutes * 60;
+    } else {
+      // Absolute: ISO 8601 datetime
+      const date = new Date(trimmed);
+      if (isNaN(date.getTime())) {
+        error = 'Invalid date/time. Use ISO format (e.g. 2026-03-22T14:00) or +N for minutes from now.';
+        return;
+      }
+      sendAt = Math.floor(date.getTime() / 1000);
+    }
+
+    error = '';
+    try {
+      await invoke('schedule_email', {
+        email: {
+          schedule_id: null,
+          to_addr: to,
+          cc,
+          bcc,
+          subject,
+          body_text: body,
+          body_html: null,
+          in_reply_to: inReplyTo,
+          ref_headers: references,
+          send_at: sendAt,
+        },
+      });
+      const displayTime = new Date(sendAt * 1000).toLocaleString();
+      showToast(`Scheduled for ${displayTime}`, 'success');
+      showScheduleInput = false;
+      scheduleTime = '';
+      handleClose();
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   async function handleSend(): Promise<void> {
     if (!to.trim()) {
       error = 'Recipient (To) is required.';
@@ -398,7 +457,28 @@
     {#if draftSavedIndicator}
       <span class="draft-saved">(draft saved)</span>
     {/if}
+    {#if showScheduleInput}
+      <input
+        class="schedule-input"
+        type="text"
+        bind:value={scheduleTime}
+        placeholder="2026-03-22T14:00 or +60"
+        on:keydown={(e) => { if (e.key === 'Enter') handleSchedule(); if (e.key === 'Escape') { showScheduleInput = false; scheduleTime = ''; } }}
+      />
+      <button
+        class="schedule-confirm-btn"
+        on:click={handleSchedule}
+        disabled={sending}
+        type="button"
+      >Confirm</button>
+    {/if}
     <span class="send-hint">Ctrl+Enter to send</span>
+    <button
+      class="schedule-btn"
+      on:click={() => (showScheduleInput = !showScheduleInput)}
+      disabled={sending}
+      type="button"
+    >Schedule</button>
     <button
       class="send-btn"
       on:click={handleSend}
@@ -616,5 +696,58 @@
   .send-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .schedule-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .schedule-btn:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--text-dim);
+  }
+
+  .schedule-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .schedule-input {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    width: 200px;
+    outline: none;
+  }
+
+  .schedule-input:focus {
+    border-color: var(--accent);
+  }
+
+  .schedule-confirm-btn {
+    background: var(--accent);
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+  }
+
+  .schedule-confirm-btn:hover:not(:disabled) {
+    filter: brightness(1.15);
   }
 </style>

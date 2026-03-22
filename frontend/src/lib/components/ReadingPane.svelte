@@ -216,7 +216,9 @@
 
       <AttachmentList uid={currentMessage.uid} folder={currentMessage.folder} />
 
-      {#if thread.length > 1}
+      {#if currentMessage.body_text === null && currentMessage.body_html === null}
+        <div class="loading-body">Loading...</div>
+      {:else if thread.length > 1}
         <div class="thread-view">
           {#each thread as msg (msg.uid)}
             <div
@@ -469,5 +471,11 @@
     border: none;
     background: white;
     border-radius: 4px;
+  }
+
+  .loading-body {
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 12px 0;
   }
 </style>

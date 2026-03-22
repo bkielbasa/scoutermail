@@ -9,7 +9,7 @@ use crate::accounts::manager::{AccountConfig, AccountManager};
 use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Label, Message, Rule, StoredEvent};
+use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Label, Message, Rule, ScheduledEmail, StoredEvent};
 use crate::store::search::SearchIndex;
 
 use serde::Serialize;
@@ -351,6 +351,18 @@ pub async fn get_messages_paged(
 }
 
 #[tauri::command]
+pub async fn get_messages_headers(
+    state: State<'_, AppState>,
+    folder: String,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Message>, String> {
+    let db = open_db(&state).await?;
+    db.get_messages_headers_paged(&folder, limit, offset)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_message_count(
     state: State<'_, AppState>,
     folder: String,
@@ -478,26 +490,20 @@ pub async fn update_flags(
         .collect();
     let imap_flags_str = imap_flags.join(" ");
 
+    // Fire-and-forget: sync flags to IMAP in background so the UI doesn't wait
     let folder_clone = folder.clone();
-    let handle = tokio::runtime::Handle::current();
-    if let Err(e) = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
         handle.block_on(async move {
-            let mut session = imap_client::connect_with_retry(&imap_config, 3)
-                .await
-                .map_err(|e| e.to_string())?;
-            imap_client::set_flags(&mut session, uid, &folder_clone, &imap_flags_str)
-                .await
-                .map_err(|e| e.to_string())?;
-            if let Err(e) = session.logout().await {
-                log::warn!("IMAP logout failed during flag update: {}", e);
+            match imap_client::connect_with_retry(&imap_config, 2).await {
+                Ok(mut session) => {
+                    let _ = imap_client::set_flags(&mut session, uid, &folder_clone, &imap_flags_str).await;
+                    let _ = session.logout().await;
+                }
+                Err(e) => log::warn!("Background flag sync failed: {}", e),
             }
-            Ok::<(), String>(())
-        })
-    })
-    .await
-    {
-        log::error!("failed to sync flags to IMAP: {}", e);
-    }
+        });
+    });
 
     Ok(())
 }
@@ -1020,4 +1026,93 @@ pub async fn run_rules_now(
     let messages = db.get_messages_by_folder(&folder).map_err(|e| e.to_string())?;
     let logs = crate::rules::engine::run_rules_on_messages(&db, &messages);
     Ok(logs)
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled email commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn schedule_email(
+    state: State<'_, AppState>,
+    email: ScheduledEmail,
+) -> Result<i64, String> {
+    let db = open_db(&state).await?;
+    db.schedule_email(&email).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_scheduled(
+    state: State<'_, AppState>,
+) -> Result<Vec<ScheduledEmail>, String> {
+    let db = open_db(&state).await?;
+    db.get_scheduled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_scheduled(
+    state: State<'_, AppState>,
+    schedule_id: i64,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.delete_scheduled(schedule_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_scheduled(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let id = get_active_id(&state).await?;
+    let (smtp_config, from_email, db_path) = {
+        let mgr = state.account_manager.lock().await;
+        let smtp = mgr.get_smtp_config(&id).map_err(|e| e.to_string())?;
+        let account = mgr.get_account(&id).map_err(|e| e.to_string())?;
+        let db_p = mgr.db_path(&id).to_string_lossy().to_string();
+        (smtp, account.email.clone(), db_p)
+    };
+
+    let db = Database::open(&db_path).map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().timestamp();
+    let due = db.get_due_scheduled(now).map_err(|e| e.to_string())?;
+
+    let mut sent_subjects = Vec::new();
+
+    for email in &due {
+        fn parse_addrs(s: &str) -> Vec<String> {
+            s.split(',')
+                .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty())
+                .collect()
+        }
+
+        let compose = ComposeEmail {
+            from: from_email.clone(),
+            to: parse_addrs(&email.to_addr),
+            cc: parse_addrs(&email.cc),
+            bcc: parse_addrs(&email.bcc),
+            subject: email.subject.clone(),
+            body_text: email.body_text.clone(),
+            body_html: email.body_html.clone(),
+            in_reply_to: email.in_reply_to.clone(),
+            references: email
+                .ref_headers
+                .as_deref()
+                .map(|r| r.split_whitespace().map(String::from).collect())
+                .unwrap_or_default(),
+        };
+
+        match crate::smtp::client::send_email(&smtp_config, &compose).await {
+            Ok(()) => {
+                sent_subjects.push(email.subject.clone());
+                if let Some(sid) = email.schedule_id {
+                    let _ = db.delete_scheduled(sid);
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to send scheduled email '{}': {}", email.subject, e);
+            }
+        }
+    }
+
+    Ok(sent_subjects)
 }

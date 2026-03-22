@@ -106,6 +106,20 @@ pub struct Rule {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduledEmail {
+    pub schedule_id: Option<i64>,
+    pub to_addr: String,
+    pub cc: String,
+    pub bcc: String,
+    pub subject: String,
+    pub body_text: String,
+    pub body_html: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub ref_headers: Option<String>,
+    pub send_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Draft {
     pub draft_id: Option<i64>,
     pub to_addr: String,
@@ -302,6 +316,21 @@ impl Database {
                 actions     TEXT NOT NULL DEFAULT '[]',
                 created_at  INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS scheduled (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                to_addr     TEXT NOT NULL,
+                cc          TEXT NOT NULL DEFAULT '',
+                bcc         TEXT NOT NULL DEFAULT '',
+                subject     TEXT NOT NULL DEFAULT '',
+                body_text   TEXT NOT NULL DEFAULT '',
+                body_html   TEXT,
+                in_reply_to TEXT,
+                ref_headers TEXT,
+                send_at     INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled(send_at);
             ",
         )?;
 
@@ -491,6 +520,40 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
                     date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to
+             FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![folder, limit, offset], |row| {
+            Ok(Message {
+                uid: row.get(0)?,
+                message_id: row.get(1)?,
+                folder: row.get(2)?,
+                subject: row.get(3)?,
+                from_addr: row.get(4)?,
+                to_addr: row.get(5)?,
+                cc: row.get(6)?,
+                date: row.get(7)?,
+                body_text: row.get(8)?,
+                body_html: row.get(9)?,
+                flags: row.get(10)?,
+                thread_id: row.get(11)?,
+                ref_headers: row.get(12)?,
+                in_reply_to: row.get(13)?,
+                reply_to: row.get(14)?,
+            })
+        })?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
+    }
+
+    /// Like `get_messages_by_folder_paged` but returns NULL for body_text and
+    /// body_html, dramatically reducing memory and transfer time for the list view.
+    pub fn get_messages_headers_paged(&self, folder: &str, limit: i64, offset: i64) -> Result<Vec<Message>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
+                    date, NULL as body_text, NULL as body_html, flags, thread_id, ref_headers, in_reply_to, reply_to
              FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC LIMIT ?2 OFFSET ?3",
         )?;
         let rows = stmt.query_map(params![folder, limit, offset], |row| {
@@ -1429,6 +1492,89 @@ impl Database {
             rules.push(row?);
         }
         Ok(rules)
+    }
+
+    // -----------------------------------------------------------------------
+    // Scheduled Email CRUD
+    // -----------------------------------------------------------------------
+
+    pub fn schedule_email(&self, email: &ScheduledEmail) -> Result<i64, StoreError> {
+        self.conn.execute(
+            "INSERT INTO scheduled (to_addr, cc, bcc, subject, body_text, body_html, in_reply_to, ref_headers, send_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                email.to_addr,
+                email.cc,
+                email.bcc,
+                email.subject,
+                email.body_text,
+                email.body_html,
+                email.in_reply_to,
+                email.ref_headers,
+                email.send_at,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_due_scheduled(&self, now: i64) -> Result<Vec<ScheduledEmail>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT schedule_id, to_addr, cc, bcc, subject, body_text, body_html, in_reply_to, ref_headers, send_at
+             FROM scheduled WHERE send_at <= ?1 ORDER BY send_at ASC",
+        )?;
+        let rows = stmt.query_map(params![now], |row| {
+            Ok(ScheduledEmail {
+                schedule_id: row.get(0)?,
+                to_addr: row.get(1)?,
+                cc: row.get(2)?,
+                bcc: row.get(3)?,
+                subject: row.get(4)?,
+                body_text: row.get(5)?,
+                body_html: row.get(6)?,
+                in_reply_to: row.get(7)?,
+                ref_headers: row.get(8)?,
+                send_at: row.get(9)?,
+            })
+        })?;
+        let mut emails = Vec::new();
+        for row in rows {
+            emails.push(row?);
+        }
+        Ok(emails)
+    }
+
+    pub fn delete_scheduled(&self, schedule_id: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM scheduled WHERE schedule_id = ?1",
+            params![schedule_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_scheduled(&self) -> Result<Vec<ScheduledEmail>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT schedule_id, to_addr, cc, bcc, subject, body_text, body_html, in_reply_to, ref_headers, send_at
+             FROM scheduled ORDER BY send_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ScheduledEmail {
+                schedule_id: row.get(0)?,
+                to_addr: row.get(1)?,
+                cc: row.get(2)?,
+                bcc: row.get(3)?,
+                subject: row.get(4)?,
+                body_text: row.get(5)?,
+                body_html: row.get(6)?,
+                in_reply_to: row.get(7)?,
+                ref_headers: row.get(8)?,
+                send_at: row.get(9)?,
+            })
+        })?;
+        let mut emails = Vec::new();
+        for row in rows {
+            emails.push(row?);
+        }
+        Ok(emails)
     }
 
     /// Create a backup of the database using VACUUM INTO.

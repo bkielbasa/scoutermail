@@ -65,6 +65,7 @@ pub fn run() {
             commands::sync_folder,
             commands::get_messages,
             commands::get_messages_paged,
+            commands::get_messages_headers,
             commands::get_message_count,
             commands::get_unified_messages,
             commands::get_message,
@@ -111,6 +112,10 @@ pub fn run() {
             commands::toggle_rule,
             commands::run_rules_now,
             commands::backup_database,
+            commands::schedule_email,
+            commands::get_scheduled,
+            commands::delete_scheduled,
+            commands::check_scheduled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

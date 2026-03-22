@@ -67,7 +67,7 @@ export async function loadMessages(folder: string, resetSelection = true): Promi
     page.subscribe((v) => (currentPage = v))();
 
     const [result, count] = await Promise.all([
-      invoke<Message[]>('get_messages_paged', {
+      invoke<Message[]>('get_messages_headers', {
         folder,
         limit: PAGE_SIZE,
         offset: currentPage * PAGE_SIZE,
@@ -112,6 +112,14 @@ export async function loadPrevPage(folder: string): Promise<void> {
   if (currentPage > 0) {
     page.set(currentPage - 1);
     await loadMessages(folder, true);
+  }
+}
+
+export async function loadFullMessage(uid: number, folder: string): Promise<Message | null> {
+  try {
+    return await invoke<Message>('get_message', { uid, folder });
+  } catch {
+    return null;
   }
 }
 

@@ -8,6 +8,7 @@
     selectedIndex,
     selectedMessage,
     loadThreadMessages,
+    loadFullMessage,
     visualSelection,
     page,
     totalMessages,
@@ -112,6 +113,17 @@
     registerHandler('open-message', async () => {
       const msg = get(selectedMessage);
       if (!msg) return;
+      // Load full body if not already loaded (lazy body loading)
+      if (msg.body_text === null && msg.body_html === null) {
+        const full = await loadFullMessage(msg.uid, msg.folder);
+        if (full) {
+          messages.update((msgs) =>
+            msgs.map((m) =>
+              m.uid === msg.uid && m.folder === msg.folder ? full : m
+            )
+          );
+        }
+      }
       if (msg.thread_id) {
         loadThreadMessages(msg.thread_id);
       }

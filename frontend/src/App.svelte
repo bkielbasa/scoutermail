@@ -454,6 +454,16 @@
           showToast('Sync failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
         }
 
+        // Check for due scheduled emails
+        try {
+          const sent = await invoke<string[]>('check_scheduled');
+          if (sent.length > 0) {
+            showToast(`Sent ${sent.length} scheduled email(s)`, 'success');
+          }
+        } catch (e) {
+          console.error('Scheduled email check failed:', e);
+        }
+
         // Check for due snoozed messages
         try {
           const snoozed = await invoke<Array<[number, string]>>('check_snoozed');
