@@ -63,10 +63,22 @@
     return !flags.includes('Seen');
   }
 
-  function selectAndLoadThread(index: number): void {
+  async function selectAndLoadThread(index: number): Promise<void> {
     selectedIndex.set(index);
     const msg = get(filteredMessages)[index];
-    if (msg?.thread_id) {
+    if (!msg) return;
+    // Load full body if not cached
+    if (msg.body_text === null && msg.body_html === null) {
+      const full = await loadFullMessage(msg.uid, msg.folder);
+      if (full) {
+        messages.update((msgs) =>
+          msgs.map((m) =>
+            m.uid === msg.uid && m.folder === msg.folder ? full : m
+          )
+        );
+      }
+    }
+    if (msg.thread_id) {
       loadThreadMessages(msg.thread_id);
     }
   }
