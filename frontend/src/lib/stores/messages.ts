@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import {
   isPermissionGranted,
@@ -76,7 +76,23 @@ export async function loadMessages(folder: string, resetSelection = true): Promi
       invoke<number>('get_message_count', { folder }),
     ]);
 
-    messages.set(result);
+    // Preserve already-loaded bodies when refreshing
+    const existing = get(messages);
+    const bodyCache = new Map<string, { body_text: string | null; body_html: string | null }>();
+    for (const m of existing) {
+      if (m.body_text !== null || m.body_html !== null) {
+        bodyCache.set(`${m.uid}:${m.folder}`, { body_text: m.body_text, body_html: m.body_html });
+      }
+    }
+    const merged = result.map((m) => {
+      const cached = bodyCache.get(`${m.uid}:${m.folder}`);
+      if (cached) {
+        return { ...m, body_text: cached.body_text, body_html: cached.body_html };
+      }
+      return m;
+    });
+
+    messages.set(merged);
     totalMessages.set(count);
 
     if (resetSelection) {

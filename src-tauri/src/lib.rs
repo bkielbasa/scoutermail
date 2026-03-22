@@ -44,6 +44,8 @@ pub fn run() {
                         || s.starts_with("http://localhost")
                         || s.starts_with("about:")
                         || s.starts_with("javascript:")
+                        || s.starts_with("data:")
+                        || s.starts_with("blob:")
                     {
                         return true;
                     }
