@@ -3,6 +3,7 @@ pub mod calendar;
 pub mod commands;
 pub mod imap;
 pub mod parser;
+pub mod rules;
 pub mod smtp;
 pub mod store;
 
@@ -97,6 +98,12 @@ pub fn run() {
             commands::get_template,
             commands::get_templates,
             commands::delete_template,
+            commands::save_rule,
+            commands::get_rules,
+            commands::get_rule,
+            commands::delete_rule,
+            commands::toggle_rule,
+            commands::run_rules_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

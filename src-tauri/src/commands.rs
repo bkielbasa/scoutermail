@@ -9,7 +9,7 @@ use crate::accounts::manager::{AccountConfig, AccountManager};
 use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
-use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Label, Message, StoredEvent};
+use crate::store::db::{AttachmentInfo, Contact, Database, Draft, Folder, Label, Message, Rule, StoredEvent};
 use crate::store::search::SearchIndex;
 
 use serde::Serialize;
@@ -305,6 +305,12 @@ pub async fn sync_folder(
                 );
             }
             search_index.commit(writer).map_err(|e| e.to_string())?;
+
+            // Run rules on newly synced messages
+            let rule_logs = crate::rules::engine::run_rules_on_messages(&db, &messages);
+            for entry in &rule_logs {
+                log::info!("[rules] {}", entry);
+            }
 
             let _ = session.logout().await;
 
@@ -894,4 +900,64 @@ pub async fn delete_template(
 ) -> Result<(), String> {
     let db = open_db(&state).await?;
     db.delete_template(&name).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Rule commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn save_rule(
+    state: State<'_, AppState>,
+    rule: Rule,
+) -> Result<i64, String> {
+    let db = open_db(&state).await?;
+    db.save_rule(&rule).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_rules(
+    state: State<'_, AppState>,
+) -> Result<Vec<Rule>, String> {
+    let db = open_db(&state).await?;
+    db.get_rules().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_rule(
+    state: State<'_, AppState>,
+    rule_id: i64,
+) -> Result<Rule, String> {
+    let db = open_db(&state).await?;
+    db.get_rule(rule_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_rule(
+    state: State<'_, AppState>,
+    rule_id: i64,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.delete_rule(rule_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn toggle_rule(
+    state: State<'_, AppState>,
+    rule_id: i64,
+    enabled: bool,
+) -> Result<(), String> {
+    let db = open_db(&state).await?;
+    db.toggle_rule(rule_id, enabled).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn run_rules_now(
+    state: State<'_, AppState>,
+    folder: String,
+) -> Result<Vec<String>, String> {
+    let db = open_db(&state).await?;
+    let messages = db.get_messages_by_folder(&folder).map_err(|e| e.to_string())?;
+    let logs = crate::rules::engine::run_rules_on_messages(&db, &messages);
+    Ok(logs)
 }

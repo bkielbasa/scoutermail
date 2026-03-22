@@ -95,6 +95,16 @@ pub struct Label {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rule {
+    pub rule_id: Option<i64>,
+    pub name: String,
+    pub enabled: bool,
+    pub conditions: String, // JSON
+    pub actions: String,    // JSON
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Draft {
     pub draft_id: Option<i64>,
     pub to_addr: String,
@@ -280,6 +290,15 @@ impl Database {
                 template_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT NOT NULL UNIQUE,
                 body        TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS rules (
+                rule_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL DEFAULT '',
+                enabled     INTEGER NOT NULL DEFAULT 1,
+                conditions  TEXT NOT NULL DEFAULT '[]',
+                actions     TEXT NOT NULL DEFAULT '[]',
+                created_at  INTEGER NOT NULL DEFAULT 0
             );
             ",
         )?;
@@ -1223,6 +1242,131 @@ impl Database {
             params![name],
         )?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Rule CRUD
+    // -----------------------------------------------------------------------
+
+    /// Save a rule. If `rule.rule_id` is `None` or 0, inserts a new row
+    /// and returns the new ID. Otherwise updates the existing row.
+    pub fn save_rule(&self, rule: &Rule) -> Result<i64, StoreError> {
+        let is_new = rule.rule_id.is_none() || rule.rule_id == Some(0);
+        if is_new {
+            self.conn.execute(
+                "INSERT INTO rules (name, enabled, conditions, actions, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    rule.name,
+                    rule.enabled as i32,
+                    rule.conditions,
+                    rule.actions,
+                    rule.created_at,
+                ],
+            )?;
+            Ok(self.conn.last_insert_rowid())
+        } else {
+            let id = rule.rule_id.unwrap();
+            self.conn.execute(
+                "UPDATE rules SET name = ?1, enabled = ?2, conditions = ?3, actions = ?4, created_at = ?5
+                 WHERE rule_id = ?6",
+                params![
+                    rule.name,
+                    rule.enabled as i32,
+                    rule.conditions,
+                    rule.actions,
+                    rule.created_at,
+                    id,
+                ],
+            )?;
+            Ok(id)
+        }
+    }
+
+    pub fn get_rules(&self) -> Result<Vec<Rule>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT rule_id, name, enabled, conditions, actions, created_at
+             FROM rules ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Rule {
+                rule_id: row.get(0)?,
+                name: row.get(1)?,
+                enabled: row.get::<_, i32>(2)? != 0,
+                conditions: row.get(3)?,
+                actions: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut rules = Vec::new();
+        for row in rows {
+            rules.push(row?);
+        }
+        Ok(rules)
+    }
+
+    pub fn get_rule(&self, rule_id: i64) -> Result<Rule, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT rule_id, name, enabled, conditions, actions, created_at
+                 FROM rules WHERE rule_id = ?1",
+                params![rule_id],
+                |row| {
+                    Ok(Rule {
+                        rule_id: row.get(0)?,
+                        name: row.get(1)?,
+                        enabled: row.get::<_, i32>(2)? != 0,
+                        conditions: row.get(3)?,
+                        actions: row.get(4)?,
+                        created_at: row.get(5)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound,
+                other => StoreError::Db(other),
+            })
+    }
+
+    pub fn delete_rule(&self, rule_id: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM rules WHERE rule_id = ?1",
+            params![rule_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn toggle_rule(&self, rule_id: i64, enabled: bool) -> Result<(), StoreError> {
+        let rows = self.conn.execute(
+            "UPDATE rules SET enabled = ?1 WHERE rule_id = ?2",
+            params![enabled as i32, rule_id],
+        )?;
+        if rows == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn get_enabled_rules(&self) -> Result<Vec<Rule>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT rule_id, name, enabled, conditions, actions, created_at
+             FROM rules WHERE enabled = 1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Rule {
+                rule_id: row.get(0)?,
+                name: row.get(1)?,
+                enabled: row.get::<_, i32>(2)? != 0,
+                conditions: row.get(3)?,
+                actions: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut rules = Vec::new();
+        for row in rows {
+            rules.push(row?);
+        }
+        Ok(rules)
     }
 
     pub fn get_events_for_message(
