@@ -60,6 +60,8 @@ pub fn run() {
             commands::test_imap_connection,
             commands::sync_folder,
             commands::get_messages,
+            commands::get_messages_paged,
+            commands::get_message_count,
             commands::get_unified_messages,
             commands::get_message,
             commands::get_thread_messages,

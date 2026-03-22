@@ -33,6 +33,10 @@ export const messages = writable<Message[]>([]);
 export const selectedIndex = writable<number>(0);
 export const visualSelection = writable<Set<number>>(new Set());
 
+export const PAGE_SIZE = 50;
+export const page = writable<number>(0);
+export const totalMessages = writable<number>(0);
+
 export type FilterType = 'all' | 'unread' | 'starred';
 export const activeFilter = writable<FilterType>('all');
 
@@ -59,8 +63,21 @@ export const threadMessages = writable<Message[]>([]);
 export async function loadMessages(folder: string, resetSelection = true): Promise<void> {
   loading.set(true);
   try {
-    const result = await invoke<Message[]>('get_messages', { folder });
+    let currentPage = 0;
+    page.subscribe((v) => (currentPage = v))();
+
+    const [result, count] = await Promise.all([
+      invoke<Message[]>('get_messages_paged', {
+        folder,
+        limit: PAGE_SIZE,
+        offset: currentPage * PAGE_SIZE,
+      }),
+      invoke<number>('get_message_count', { folder }),
+    ]);
+
     messages.set(result);
+    totalMessages.set(count);
+
     if (resetSelection) {
       selectedIndex.set(0);
     } else {
@@ -73,6 +90,28 @@ export async function loadMessages(folder: string, resetSelection = true): Promi
     unreadCount.set(unread);
   } finally {
     loading.set(false);
+  }
+}
+
+export async function loadNextPage(folder: string): Promise<void> {
+  let currentPage = 0;
+  let total = 0;
+  page.subscribe((v) => (currentPage = v))();
+  totalMessages.subscribe((v) => (total = v))();
+
+  if ((currentPage + 1) * PAGE_SIZE < total) {
+    page.set(currentPage + 1);
+    await loadMessages(folder, true);
+  }
+}
+
+export async function loadPrevPage(folder: string): Promise<void> {
+  let currentPage = 0;
+  page.subscribe((v) => (currentPage = v))();
+
+  if (currentPage > 0) {
+    page.set(currentPage - 1);
+    await loadMessages(folder, true);
   }
 }
 

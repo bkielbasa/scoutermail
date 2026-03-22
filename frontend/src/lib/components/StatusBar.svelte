@@ -1,6 +1,6 @@
 <script lang="ts">
   import { mode, unifiedMode, loading } from '$lib/stores/ui';
-  import { activeAccount, activeFolder, unreadCount } from '$lib/stores/accounts';
+  import { activeAccount, activeFolder, unreadCount, accounts, getAccountColor } from '$lib/stores/accounts';
   import { activeFilter } from '$lib/stores/messages';
 
   const modeColors: Record<string, string> = {
@@ -17,19 +17,34 @@
   let isUnified = $state(false);
   let isLoading = $state(false);
   let currentFilter = $state('all');
+  let accountList = $state<{ id: string }[]>([]);
+  let accountColor = $state('#7c3aed');
 
   mode.subscribe((v) => (currentMode = v));
   activeFilter.subscribe((v) => (currentFilter = v));
-  activeAccount.subscribe((v) => (account = v));
+  activeAccount.subscribe((v) => {
+    account = v;
+    // Recompute color when account changes
+    const idx = accountList.findIndex((a) => a.id === v?.id);
+    accountColor = getAccountColor(idx >= 0 ? idx : 0);
+  });
   activeFolder.subscribe((v) => (folder = v));
   unreadCount.subscribe((v) => (unread = v));
   unifiedMode.subscribe((v) => (isUnified = v));
   loading.subscribe((v) => (isLoading = v));
+  accounts.subscribe((v) => {
+    accountList = v;
+    // Recompute color when accounts list changes
+    if (account) {
+      const idx = v.findIndex((a) => a.id === account?.id);
+      accountColor = getAccountColor(idx >= 0 ? idx : 0);
+    }
+  });
 </script>
 
 <div class="status-bar">
   <span class="left">
-    {isUnified ? 'All Accounts' : (account ? account.name : 'no account')}:{folder}{#if unread > 0}({unread}){/if}{#if currentFilter !== 'all'} <span class="filter-badge">[{currentFilter}]</span>{/if}{#if isLoading} <span class="syncing">syncing...</span>{/if}
+{#if !isUnified && account}<span class="account-dot" style="background:{accountColor}"></span>{/if}{isUnified ? 'All Accounts' : (account ? account.name : 'no account')}:{folder}{#if unread > 0}({unread}){/if}{#if currentFilter !== 'all'} <span class="filter-badge">[{currentFilter}]</span>{/if}{#if isLoading} <span class="syncing">syncing...</span>{/if}
   </span>
   <span class="center" style="color: {modeColors[currentMode]}">
     {currentMode}
@@ -58,6 +73,15 @@
   }
   .right {
     color: var(--text-dim);
+  }
+  .account-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+    flex-shrink: 0;
   }
   .filter-badge {
     color: #f59e0b;

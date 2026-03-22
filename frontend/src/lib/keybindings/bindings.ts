@@ -58,6 +58,10 @@ export const defaultBindings: BindingDef[] = [
   { keys: '8', action: 'switch-account-8', mode: 'NORMAL', description: 'Switch to account 8' },
   { keys: '9', action: 'switch-account-9', mode: 'NORMAL', description: 'Switch to account 9' },
 
+  // NORMAL mode — pagination
+  { keys: ']', action: 'next-page', mode: 'NORMAL', description: 'Next page' },
+  { keys: '[', action: 'prev-page', mode: 'NORMAL', description: 'Previous page' },
+
   // VISUAL mode
   { keys: 'j', action: 'visual-extend-down', mode: 'VISUAL', description: 'Extend selection down' },
   { keys: 'k', action: 'visual-extend-up', mode: 'VISUAL', description: 'Extend selection up' },

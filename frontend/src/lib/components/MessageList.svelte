@@ -9,8 +9,14 @@
     selectedMessage,
     loadThreadMessages,
     visualSelection,
+    page,
+    totalMessages,
+    PAGE_SIZE,
+    loadNextPage,
+    loadPrevPage,
   } from '$lib/stores/messages';
   import { focusPane, mode, unifiedMode } from '$lib/stores/ui';
+  import { activeFolder, getAccountColorById } from '$lib/stores/accounts';
   import { registerHandler } from '$lib/keybindings/engine';
 
   function formatDate(dateStr: string | null): string {
@@ -67,11 +73,31 @@
   onMount(() => {
     registerHandler('list-down', () => {
       const msgs = get(filteredMessages);
+      const idx = get(selectedIndex);
+      if (idx >= msgs.length - 1) {
+        // At bottom of current page, auto-load next page
+        loadNextPage(get(activeFolder));
+        return;
+      }
       selectedIndex.update((i) => Math.min(i + 1, msgs.length - 1));
     });
 
     registerHandler('list-up', () => {
+      const idx = get(selectedIndex);
+      if (idx <= 0) {
+        // At top of current page, auto-load prev page
+        loadPrevPage(get(activeFolder));
+        return;
+      }
       selectedIndex.update((i) => Math.max(i - 1, 0));
+    });
+
+    registerHandler('next-page', () => {
+      loadNextPage(get(activeFolder));
+    });
+
+    registerHandler('prev-page', () => {
+      loadPrevPage(get(activeFolder));
     });
 
     registerHandler('list-top', () => {
@@ -161,12 +187,22 @@
   let isUnified = false;
   const unsubUnified = unifiedMode.subscribe((v) => (isUnified = v));
 
+  let currentPage = 0;
+  let total = 0;
+  const unsubPage = page.subscribe((v) => (currentPage = v));
+  const unsubTotal = totalMessages.subscribe((v) => (total = v));
+
+  $: pageStart = currentPage * PAGE_SIZE + 1;
+  $: pageEnd = Math.min((currentPage + 1) * PAGE_SIZE, total);
+
   onDestroy(() => {
     unsubMessages();
     unsubIndex();
     unsubFocus();
     unsubVisual();
     unsubUnified();
+    unsubPage();
+    unsubTotal();
   });
 </script>
 
@@ -186,7 +222,7 @@
         <div class="msg-header">
           <span class="sender">
             {#if isUnified && msg.account_name}
-              <span class="account-badge">{msg.account_name}</span>
+              <span class="account-badge" style="background:{getAccountColorById(msg.account_id ?? '')}20;color:{getAccountColorById(msg.account_id ?? '')}">{msg.account_name}</span>
             {/if}
             {extractName(msg.from_addr)}
           </span>
@@ -198,6 +234,18 @@
         {/if}
       </button>
     {/each}
+  {/if}
+
+  {#if total > 0}
+    <div class="page-info">
+      {pageStart}-{pageEnd} of {total}
+      {#if currentPage > 0}
+        <span class="page-hint">[</span>
+      {/if}
+      {#if (currentPage + 1) * PAGE_SIZE < total}
+        <span class="page-hint">]</span>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -288,14 +336,27 @@
     margin-top: 2px;
   }
 
+  .page-info {
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .page-hint {
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+    margin-left: 4px;
+  }
+
   .account-badge {
     display: inline-block;
     font-size: 9px;
     font-weight: 600;
     padding: 1px 4px;
     border-radius: 3px;
-    background: var(--accent-dim, rgba(99, 102, 241, 0.15));
-    color: var(--accent, #6366f1);
     margin-right: 4px;
     vertical-align: baseline;
     text-transform: uppercase;

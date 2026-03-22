@@ -335,6 +335,27 @@ pub async fn get_messages(
 }
 
 #[tauri::command]
+pub async fn get_messages_paged(
+    state: State<'_, AppState>,
+    folder: String,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Message>, String> {
+    let db = open_db(&state).await?;
+    db.get_messages_by_folder_paged(&folder, limit, offset)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_message_count(
+    state: State<'_, AppState>,
+    folder: String,
+) -> Result<i64, String> {
+    let db = open_db(&state).await?;
+    db.get_message_count(&folder).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_message(
     state: State<'_, AppState>,
     uid: u32,

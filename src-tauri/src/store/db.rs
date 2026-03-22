@@ -487,6 +487,46 @@ impl Database {
         Ok(messages)
     }
 
+    pub fn get_messages_by_folder_paged(&self, folder: &str, limit: i64, offset: i64) -> Result<Vec<Message>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
+                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to
+             FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![folder, limit, offset], |row| {
+            Ok(Message {
+                uid: row.get(0)?,
+                message_id: row.get(1)?,
+                folder: row.get(2)?,
+                subject: row.get(3)?,
+                from_addr: row.get(4)?,
+                to_addr: row.get(5)?,
+                cc: row.get(6)?,
+                date: row.get(7)?,
+                body_text: row.get(8)?,
+                body_html: row.get(9)?,
+                flags: row.get(10)?,
+                thread_id: row.get(11)?,
+                ref_headers: row.get(12)?,
+                in_reply_to: row.get(13)?,
+                reply_to: row.get(14)?,
+            })
+        })?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
+    }
+
+    pub fn get_message_count(&self, folder: &str) -> Result<i64, StoreError> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE folder = ?1",
+            params![folder],
+            |row| row.get(0),
+        ).map_err(StoreError::Db)
+    }
+
     pub fn get_threads_by_folder(&self, folder: &str) -> Result<Vec<Thread>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT m.thread_id, m.subject, MAX(m.date) as last_date, COUNT(*) as cnt
