@@ -1006,15 +1006,16 @@ impl Database {
     pub fn get_attachment_data(
         &self,
         attachment_id: i64,
-    ) -> Result<(Vec<u8>, Option<String>), StoreError> {
+    ) -> Result<(Vec<u8>, Option<String>, Option<String>), StoreError> {
         self.conn
             .query_row(
-                "SELECT content, filename FROM attachments WHERE attachment_id = ?1",
+                "SELECT content, filename, mime_type FROM attachments WHERE attachment_id = ?1",
                 params![attachment_id],
                 |row| {
                     let data: Vec<u8> = row.get(0)?;
                     let filename: Option<String> = row.get(1)?;
-                    Ok((data, filename))
+                    let mime_type: Option<String> = row.get(2)?;
+                    Ok((data, filename, mime_type))
                 },
             )
             .map_err(|e| match e {

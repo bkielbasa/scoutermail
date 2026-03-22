@@ -816,7 +816,7 @@ pub async fn save_attachment(
     attachment_id: i64,
 ) -> Result<String, String> {
     let db = open_db(&state).await?;
-    let (data, filename) = db
+    let (data, filename, _mime_type) = db
         .get_attachment_data(attachment_id)
         .map_err(|e| e.to_string())?;
     let downloads = dirs::download_dir()
@@ -826,6 +826,20 @@ pub async fn save_attachment(
     let path = downloads.join(&target_name);
     std::fs::write(&path, &data).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_attachment_base64(
+    state: State<'_, AppState>,
+    attachment_id: i64,
+) -> Result<(String, Option<String>, Option<String>), String> {
+    let db = open_db(&state).await?;
+    let (data, filename, mime_type) = db
+        .get_attachment_data(attachment_id)
+        .map_err(|e| e.to_string())?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+    Ok((b64, filename, mime_type))
 }
 
 // ---------------------------------------------------------------------------
