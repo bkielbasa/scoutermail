@@ -23,6 +23,7 @@ export interface Message {
   thread_id: string | null;
   ref_headers: string | null;
   in_reply_to: string | null;
+  reply_to: string | null;
   // Unified inbox fields (only present when in unified mode)
   account_id?: string;
   account_name?: string;

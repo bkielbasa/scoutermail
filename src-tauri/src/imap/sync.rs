@@ -127,6 +127,7 @@ pub async fn sync_folder(
                     thread_id: None,
                     ref_headers: None,
                     in_reply_to: None,
+                    reply_to: None,
                 };
                 db.upsert_message(&msg)
                     .map_err(|e| ImapError::Imap(format!("upsert_message: {}", e)))?;
@@ -159,6 +160,7 @@ pub async fn sync_folder(
             thread_id: None,
             ref_headers,
             in_reply_to: parsed_email.in_reply_to,
+            reply_to: parsed_email.reply_to,
         };
 
         // Auto-extract contacts from From header
@@ -269,6 +271,7 @@ fn parse_fetched(fetch: &async_imap::types::Fetch, folder: &str) -> Option<Messa
                 thread_id: None,
                 ref_headers: None,
                 in_reply_to: None,
+                reply_to: None,
             });
         }
     };
@@ -299,6 +302,7 @@ fn parse_fetched(fetch: &async_imap::types::Fetch, folder: &str) -> Option<Messa
         thread_id: None, // Will be set by assign_threads
         ref_headers,
         in_reply_to: parsed.in_reply_to,
+        reply_to: parsed.reply_to,
     })
 }
 

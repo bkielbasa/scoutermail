@@ -408,6 +408,16 @@
       }
     });
 
+    // Backup database
+    registerHandler('cmd:backup', async () => {
+      try {
+        const path = await invoke<string>('backup_database');
+        showToast(`Backup saved: ${path}`, 'success');
+      } catch (err: unknown) {
+        showToast(err instanceof Error ? err.message : String(err), 'error');
+      }
+    });
+
     // Mark unread
     registerHandler('mark-unread', async () => {
       const msg = get(selectedMessage);

@@ -204,6 +204,7 @@ mod tests {
             thread_id: None,
             ref_headers: refs.map(|s| s.to_string()),
             in_reply_to: in_reply_to.map(|s| s.to_string()),
+            reply_to: None,
         }
     }
 

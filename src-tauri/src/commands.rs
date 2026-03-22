@@ -179,6 +179,7 @@ pub struct UnifiedMessage {
     pub thread_id: Option<String>,
     pub ref_headers: Option<String>,
     pub in_reply_to: Option<String>,
+    pub reply_to: Option<String>,
 }
 
 #[tauri::command]
@@ -213,6 +214,7 @@ pub async fn get_unified_messages(
                         thread_id: msg.thread_id,
                         ref_headers: msg.ref_headers,
                         in_reply_to: msg.in_reply_to,
+                        reply_to: msg.reply_to,
                     });
                 }
             }
@@ -242,7 +244,7 @@ pub async fn test_imap_connection(
         username,
         password,
     };
-    let mut session = imap_client::connect(&config)
+    let mut session = imap_client::connect_with_retry(&config, 3)
         .await
         .map_err(|e| e.to_string())?;
     let folders = imap_client::list_folders(&mut session)
@@ -278,7 +280,7 @@ pub async fn sync_folder(
     let handle = tokio::runtime::Handle::current();
     let messages = tokio::task::spawn_blocking(move || {
         handle.block_on(async move {
-            let mut session = imap_client::connect(&imap_config)
+            let mut session = imap_client::connect_with_retry(&imap_config, 3)
                 .await
                 .map_err(|e| e.to_string())?;
 
@@ -455,7 +457,7 @@ pub async fn update_flags(
     let handle = tokio::runtime::Handle::current();
     let _ = tokio::task::spawn_blocking(move || {
         handle.block_on(async move {
-            let mut session = imap_client::connect(&imap_config)
+            let mut session = imap_client::connect_with_retry(&imap_config, 3)
                 .await
                 .map_err(|e| e.to_string())?;
             imap_client::set_flags(&mut session, uid, &folder_clone, &imap_flags_str)
@@ -504,7 +506,7 @@ pub async fn move_message(
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         handle.block_on(async move {
-            let mut session = imap_client::connect(&imap_config)
+            let mut session = imap_client::connect_with_retry(&imap_config, 3)
                 .await
                 .map_err(|e| e.to_string())?;
             imap_client::move_message(&mut session, uid, &from, &to)
@@ -900,6 +902,31 @@ pub async fn delete_template(
 ) -> Result<(), String> {
     let db = open_db(&state).await?;
     db.delete_template(&name).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Backup
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn backup_database(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let id = get_active_id(&state).await?;
+    let mgr = state.account_manager.lock().await;
+    let db_path = mgr.db_path(&id);
+    let db_dir = db_path.parent().ok_or_else(|| "cannot determine database directory".to_string())?;
+
+    let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup_name = format!("mail_backup_{}.db", now);
+    let backup_path = db_dir.join(&backup_name);
+    let backup_path_str = backup_path.to_string_lossy().to_string();
+
+    let db_path_str = db_path.to_string_lossy().to_string();
+    let db = Database::open(&db_path_str).map_err(|e| e.to_string())?;
+    db.backup(&backup_path_str).map_err(|e| e.to_string())?;
+
+    Ok(backup_path_str)
 }
 
 // ---------------------------------------------------------------------------

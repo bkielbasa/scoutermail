@@ -36,6 +36,7 @@ pub struct Message {
     pub thread_id: Option<String>,
     pub ref_headers: Option<String>,
     pub in_reply_to: Option<String>,
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +197,7 @@ impl Database {
                 thread_id    TEXT,
                 ref_headers  TEXT,
                 in_reply_to  TEXT,
+                reply_to     TEXT,
                 PRIMARY KEY (uid, folder)
             );
 
@@ -316,6 +318,19 @@ impl Database {
             )?;
         }
 
+        // Migration: add reply_to column if missing (existing databases)
+        let has_reply_to: bool = self.conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='reply_to'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        if !has_reply_to {
+            self.conn.execute_batch(
+                "ALTER TABLE messages ADD COLUMN reply_to TEXT;"
+            )?;
+        }
+
         Ok(())
     }
 
@@ -328,8 +343,8 @@ impl Database {
         self.conn.execute(
             "INSERT INTO messages
                 (uid, folder, message_id, subject, from_addr, to_addr, cc,
-                 date, date_epoch, body_text, body_html, flags, thread_id, ref_headers, in_reply_to)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+                 date, date_epoch, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
              ON CONFLICT(uid, folder) DO UPDATE SET
                 message_id  = excluded.message_id,
                 subject     = excluded.subject,
@@ -343,7 +358,8 @@ impl Database {
                 flags       = excluded.flags,
                 thread_id   = excluded.thread_id,
                 ref_headers = excluded.ref_headers,
-                in_reply_to = excluded.in_reply_to",
+                in_reply_to = excluded.in_reply_to,
+                reply_to    = excluded.reply_to",
             params![
                 msg.uid,
                 msg.folder,
@@ -360,6 +376,7 @@ impl Database {
                 msg.thread_id,
                 msg.ref_headers,
                 msg.in_reply_to,
+                msg.reply_to,
             ],
         )?;
         Ok(())
@@ -369,7 +386,7 @@ impl Database {
         self.conn
             .query_row(
                 "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
-                        date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to
+                        date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to
                  FROM messages WHERE uid = ?1 AND folder = ?2",
                 params![uid, folder],
                 |row| {
@@ -388,6 +405,7 @@ impl Database {
                         thread_id: row.get(11)?,
                         ref_headers: row.get(12)?,
                         in_reply_to: row.get(13)?,
+                        reply_to: row.get(14)?,
                     })
                 },
             )
@@ -400,7 +418,7 @@ impl Database {
     pub fn get_messages_by_folder(&self, folder: &str) -> Result<Vec<Message>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
-                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to
+                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to
              FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC",
         )?;
         let rows = stmt.query_map(params![folder], |row| {
@@ -419,6 +437,7 @@ impl Database {
                 thread_id: row.get(11)?,
                 ref_headers: row.get(12)?,
                 in_reply_to: row.get(13)?,
+                reply_to: row.get(14)?,
             })
         })?;
         let mut messages = Vec::new();
@@ -436,7 +455,7 @@ impl Database {
     ) -> Result<Vec<(Message, i64)>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
-                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to,
+                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to,
                     date_epoch
              FROM messages WHERE folder = ?1 ORDER BY date_epoch DESC",
         )?;
@@ -456,8 +475,9 @@ impl Database {
                 thread_id: row.get(11)?,
                 ref_headers: row.get(12)?,
                 in_reply_to: row.get(13)?,
+                reply_to: row.get(14)?,
             };
-            let epoch: i64 = row.get(14)?;
+            let epoch: i64 = row.get(15)?;
             Ok((msg, epoch))
         })?;
         let mut messages = Vec::new();
@@ -493,7 +513,7 @@ impl Database {
     pub fn get_thread_messages(&self, thread_id: &str) -> Result<Vec<Message>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT uid, message_id, folder, subject, from_addr, to_addr, cc,
-                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to
+                    date, body_text, body_html, flags, thread_id, ref_headers, in_reply_to, reply_to
              FROM messages WHERE thread_id = ?1 ORDER BY date ASC",
         )?;
         let rows = stmt.query_map(params![thread_id], |row| {
@@ -512,6 +532,7 @@ impl Database {
                 thread_id: row.get(11)?,
                 ref_headers: row.get(12)?,
                 in_reply_to: row.get(13)?,
+                reply_to: row.get(14)?,
             })
         })?;
         let mut messages = Vec::new();
@@ -1139,7 +1160,7 @@ impl Database {
     pub fn get_messages_by_label(&self, label_id: i64) -> Result<Vec<Message>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT m.uid, m.message_id, m.folder, m.subject, m.from_addr, m.to_addr, m.cc,
-                    m.date, m.body_text, m.body_html, m.flags, m.thread_id, m.ref_headers, m.in_reply_to
+                    m.date, m.body_text, m.body_html, m.flags, m.thread_id, m.ref_headers, m.in_reply_to, m.reply_to
              FROM messages m
              JOIN message_labels ml ON m.uid = ml.uid AND m.folder = ml.folder
              WHERE ml.label_id = ?1
@@ -1161,6 +1182,7 @@ impl Database {
                 thread_id: row.get(11)?,
                 ref_headers: row.get(12)?,
                 in_reply_to: row.get(13)?,
+                reply_to: row.get(14)?,
             })
         })?;
         let mut messages = Vec::new();
@@ -1369,6 +1391,15 @@ impl Database {
         Ok(rules)
     }
 
+    /// Create a backup of the database using VACUUM INTO.
+    pub fn backup(&self, backup_path: &str) -> Result<(), StoreError> {
+        self.conn.execute_batch(&format!(
+            "VACUUM INTO '{}'",
+            backup_path.replace('\'', "''")
+        ))?;
+        Ok(())
+    }
+
     pub fn get_events_for_message(
         &self,
         message_uid: u32,
@@ -1433,6 +1464,7 @@ mod tests {
             thread_id: Some("thread-1".to_string()),
             ref_headers: None,
             in_reply_to: None,
+            reply_to: None,
         }
     }
 

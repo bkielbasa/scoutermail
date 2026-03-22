@@ -104,6 +104,7 @@ pub fn run() {
             commands::delete_rule,
             commands::toggle_rule,
             commands::run_rules_now,
+            commands::backup_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

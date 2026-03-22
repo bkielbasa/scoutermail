@@ -33,6 +33,7 @@ pub struct ParsedEmail {
     pub body_html: Option<String>,
     pub references: Vec<String>,
     pub in_reply_to: Option<String>,
+    pub reply_to: Option<String>,
     pub attachments: Vec<Attachment>,
     pub inline_images: Vec<InlineImage>,
     pub raw_headers: String,
@@ -56,6 +57,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
     let cc = headers.get_first_value("Cc");
     let date = headers.get_first_value("Date");
     let in_reply_to = headers.get_first_value("In-Reply-To");
+    let reply_to = headers.get_first_value("Reply-To");
 
     let references = headers
         .get_first_value("References")
@@ -96,6 +98,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedEmail, String> {
         body_html,
         references,
         in_reply_to,
+        reply_to,
         attachments,
         inline_images,
         raw_headers,

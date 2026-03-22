@@ -81,6 +81,25 @@ pub async fn connect(config: &ImapConfig) -> Result<ImapSession, ImapError> {
     Ok(session)
 }
 
+/// Connect to an IMAP server with exponential backoff retry logic.
+pub async fn connect_with_retry(config: &ImapConfig, max_retries: u32) -> Result<ImapSession, ImapError> {
+    let mut retries = 0;
+    loop {
+        match connect(config).await {
+            Ok(session) => return Ok(session),
+            Err(e) => {
+                retries += 1;
+                if retries >= max_retries {
+                    return Err(e);
+                }
+                let delay = std::time::Duration::from_secs(2u64.pow(retries.min(5)));
+                log::warn!("IMAP connection failed (attempt {}/{}): {}, retrying in {:?}", retries, max_retries, e, delay);
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+}
+
 /// Move a message from one folder to another by UID.
 /// Tries the IMAP MOVE command (RFC 6851) first, falling back to COPY+DELETE+EXPUNGE.
 pub async fn move_message(session: &mut ImapSession, uid: u32, from: &str, to: &str) -> Result<(), ImapError> {

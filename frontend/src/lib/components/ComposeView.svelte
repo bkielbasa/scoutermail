@@ -203,7 +203,7 @@
       const cleanSubject = stripSubjectPrefix(msg.subject);
 
       if (replyMode === 'reply' || replyMode === 'reply-all') {
-        to = msg.from_addr || '';
+        to = msg.reply_to || msg.from_addr || '';
         subject = `Re: ${cleanSubject}`;
         const quoted = buildQuotedBody(msg);
         body = sigBlock + quoted;
