@@ -2,12 +2,12 @@
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/refs/heads/main/packages/tauri-cli/config.schema.json",
   "productName": "ScouterMail",
   "version": "0.1.0",
-  "identifier": "com.scoutermail.app",
+  "identifier": "com.scoutermail.desktop",
   "build": {
     "frontendDist": "../frontend/dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "cd ../frontend && npm run dev",
-    "beforeBuildCommand": "cd ../frontend && npm run build"
+    "beforeDevCommand": "npm run --prefix frontend dev",
+    "beforeBuildCommand": "npm run --prefix frontend build"
   },
   "app": {
     "windows": [
