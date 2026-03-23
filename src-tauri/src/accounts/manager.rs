@@ -196,13 +196,11 @@ impl AccountManager {
         self.data_dir.join(id).join("search_index")
     }
 
-    /// Build an `OAuthConfig` for the given account, reading client_id/secret
-    /// from the per-account settings stored alongside the DB.
+    /// Build an `OAuthConfig` for the given account using the default
+    /// provider configs (PKCE flow, no client secret needed).
     pub fn get_oauth_config(
         &self,
         id: &str,
-        client_id: &str,
-        client_secret: &str,
     ) -> Result<crate::accounts::oauth::OAuthConfig, AccountError> {
         let account = self.get_account(id)?;
         let provider = account
@@ -210,8 +208,8 @@ impl AccountManager {
             .as_deref()
             .ok_or_else(|| AccountError::NotFound("no oauth_provider set".into()))?;
         let config = match provider {
-            "google" => crate::accounts::oauth::google_config(client_id, client_secret),
-            "microsoft" => crate::accounts::oauth::microsoft_config(client_id, client_secret),
+            "google" => crate::accounts::oauth::google_config(),
+            "microsoft" => crate::accounts::oauth::microsoft_config(),
             _ => {
                 return Err(AccountError::NotFound(format!(
                     "unsupported oauth provider: {}",

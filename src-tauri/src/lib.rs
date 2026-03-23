@@ -34,6 +34,7 @@ pub fn run() {
         oauth_receiver: Arc::new(Mutex::new(None)),
         oauth_config: Arc::new(Mutex::new(None)),
         oauth_port: Arc::new(Mutex::new(None)),
+        oauth_pkce_verifier: Arc::new(Mutex::new(None)),
     };
 
     tauri::Builder::default()

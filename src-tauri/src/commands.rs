@@ -29,6 +29,8 @@ pub struct AppState {
     pub oauth_config: Arc<Mutex<Option<OAuthConfig>>>,
     /// OAuth flow state: the port used by the callback server.
     pub oauth_port: Arc<Mutex<Option<u16>>>,
+    /// OAuth flow state: PKCE code verifier for the token exchange.
+    pub oauth_pkce_verifier: Arc<Mutex<Option<oauth2::PkceCodeVerifier>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -281,20 +283,42 @@ pub async fn get_provider_defaults(
 pub async fn start_oauth(
     state: State<'_, AppState>,
     provider: String,
-    client_id: String,
-    client_secret: String,
 ) -> Result<String, String> {
     let config = match provider.as_str() {
-        "google" => oauth::google_config(&client_id, &client_secret),
-        "microsoft" => oauth::microsoft_config(&client_id, &client_secret),
+        "google" => {
+            // Check for custom client_id override via settings
+            let custom = if let Ok(db) = open_db(&state).await {
+                db.get_setting("google_client_id").ok().flatten()
+            } else {
+                None
+            };
+            if let Some(id) = custom {
+                let secret = open_db(&state)
+                    .await
+                    .ok()
+                    .and_then(|db| db.get_setting("google_client_secret").ok().flatten());
+                oauth::OAuthConfig {
+                    provider: "google".into(),
+                    client_id: id,
+                    client_secret: secret,
+                    auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+                    token_url: "https://oauth2.googleapis.com/token".into(),
+                    scopes: vec!["https://mail.google.com/".into()],
+                }
+            } else {
+                oauth::google_config()
+            }
+        }
+        "microsoft" => oauth::microsoft_config(),
         _ => return Err("unsupported provider".into()),
     };
 
-    let (auth_url, port, rx) = oauth::start_oauth_flow(&config)?;
+    let (auth_url, port, rx, pkce_verifier) = oauth::start_oauth_flow(&config)?;
 
     *state.oauth_receiver.lock().await = Some(rx);
     *state.oauth_config.lock().await = Some(config);
     *state.oauth_port.lock().await = Some(port);
+    *state.oauth_pkce_verifier.lock().await = Some(pkce_verifier);
 
     Ok(auth_url)
 }
@@ -319,6 +343,12 @@ pub async fn complete_oauth(state: State<'_, AppState>) -> Result<OAuthTokens, S
         .await
         .take()
         .ok_or("no OAuth port")?;
+    let pkce_verifier = state
+        .oauth_pkce_verifier
+        .lock()
+        .await
+        .take()
+        .ok_or("no PKCE verifier")?;
 
     // Wait for the callback in a blocking thread to avoid blocking the async runtime.
     let code = tokio::task::spawn_blocking(move || {
@@ -328,7 +358,7 @@ pub async fn complete_oauth(state: State<'_, AppState>) -> Result<OAuthTokens, S
     .await
     .map_err(|e| format!("spawn_blocking failed: {}", e))??;
 
-    let tokens = oauth::exchange_code(&config, &code, port).await?;
+    let tokens = oauth::exchange_code(&config, &code, port, pkce_verifier).await?;
     Ok(tokens)
 }
 

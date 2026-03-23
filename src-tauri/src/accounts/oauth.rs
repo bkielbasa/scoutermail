@@ -1,18 +1,25 @@
 use base64::Engine;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
-    TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
+    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
     basic::BasicClient,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
 use std::thread;
 
+// Placeholder client IDs — replace with your own registered app credentials
+// Register at: https://console.cloud.google.com/apis/credentials (Desktop app type)
+const GOOGLE_CLIENT_ID: &str = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
+// Register at: https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApplications
+// Use "Mobile and desktop applications" platform with http://localhost redirect
+const MICROSOFT_CLIENT_ID: &str = "YOUR_MICROSOFT_CLIENT_ID";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthConfig {
     pub provider: String,
     pub client_id: String,
-    pub client_secret: String,
+    pub client_secret: Option<String>,
     pub auth_url: String,
     pub token_url: String,
     pub scopes: Vec<String>,
@@ -25,22 +32,22 @@ pub struct OAuthTokens {
     pub expires_at: Option<i64>,
 }
 
-pub fn google_config(client_id: &str, client_secret: &str) -> OAuthConfig {
+pub fn google_config() -> OAuthConfig {
     OAuthConfig {
         provider: "google".into(),
-        client_id: client_id.into(),
-        client_secret: client_secret.into(),
+        client_id: GOOGLE_CLIENT_ID.into(),
+        client_secret: None,
         auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
         token_url: "https://oauth2.googleapis.com/token".into(),
         scopes: vec!["https://mail.google.com/".into()],
     }
 }
 
-pub fn microsoft_config(client_id: &str, client_secret: &str) -> OAuthConfig {
+pub fn microsoft_config() -> OAuthConfig {
     OAuthConfig {
         provider: "microsoft".into(),
-        client_id: client_id.into(),
-        client_secret: client_secret.into(),
+        client_id: MICROSOFT_CLIENT_ID.into(),
+        client_secret: None,
         auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
         token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
         scopes: vec![
@@ -51,21 +58,30 @@ pub fn microsoft_config(client_id: &str, client_secret: &str) -> OAuthConfig {
     }
 }
 
-/// Start OAuth2 flow: opens a local HTTP server, returns the authorization URL
-/// and the port used by the callback server plus a receiver for the auth code.
+/// Start OAuth2 flow: opens a local HTTP server, returns the authorization URL,
+/// the port used by the callback server, a receiver for the auth code, and the
+/// PKCE code verifier needed for the token exchange.
 pub fn start_oauth_flow(
     config: &OAuthConfig,
-) -> Result<(String, u16, mpsc::Receiver<String>), String> {
+) -> Result<(String, u16, mpsc::Receiver<String>, PkceCodeVerifier), String> {
     let redirect_port = portpicker::pick_unused_port().ok_or("no free port")?;
     let redirect_url = format!("http://localhost:{}/callback", redirect_port);
 
-    let client = BasicClient::new(ClientId::new(config.client_id.clone()))
-        .set_client_secret(ClientSecret::new(config.client_secret.clone()))
+    let mut client = BasicClient::new(ClientId::new(config.client_id.clone()))
         .set_auth_uri(AuthUrl::new(config.auth_url.clone()).map_err(|e| e.to_string())?)
         .set_token_uri(TokenUrl::new(config.token_url.clone()).map_err(|e| e.to_string())?)
         .set_redirect_uri(RedirectUrl::new(redirect_url.clone()).map_err(|e| e.to_string())?);
 
-    let mut auth_request = client.authorize_url(CsrfToken::new_random);
+    if let Some(ref secret) = config.client_secret {
+        client = client.set_client_secret(ClientSecret::new(secret.clone()));
+    }
+
+    // Generate PKCE challenge
+    let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+
+    let mut auth_request = client
+        .authorize_url(CsrfToken::new_random)
+        .set_pkce_challenge(pkce_challenge);
     for scope in &config.scopes {
         auth_request = auth_request.add_scope(Scope::new(scope.clone()));
     }
@@ -101,7 +117,7 @@ pub fn start_oauth_flow(
         }
     });
 
-    Ok((auth_url.to_string(), redirect_port, rx))
+    Ok((auth_url.to_string(), redirect_port, rx, pkce_verifier))
 }
 
 fn extract_code_from_url(url: &str) -> Option<String> {
@@ -115,24 +131,29 @@ fn extract_code_from_url(url: &str) -> Option<String> {
     None
 }
 
-/// Exchange an authorization code for tokens.
+/// Exchange an authorization code for tokens, completing the PKCE flow.
 pub async fn exchange_code(
     config: &OAuthConfig,
     code: &str,
     redirect_port: u16,
+    pkce_verifier: PkceCodeVerifier,
 ) -> Result<OAuthTokens, String> {
     let redirect_url = format!("http://localhost:{}/callback", redirect_port);
 
-    let client = BasicClient::new(ClientId::new(config.client_id.clone()))
-        .set_client_secret(ClientSecret::new(config.client_secret.clone()))
+    let mut client = BasicClient::new(ClientId::new(config.client_id.clone()))
         .set_auth_uri(AuthUrl::new(config.auth_url.clone()).map_err(|e| e.to_string())?)
         .set_token_uri(TokenUrl::new(config.token_url.clone()).map_err(|e| e.to_string())?)
         .set_redirect_uri(RedirectUrl::new(redirect_url).map_err(|e| e.to_string())?);
+
+    if let Some(ref secret) = config.client_secret {
+        client = client.set_client_secret(ClientSecret::new(secret.clone()));
+    }
 
     let http_client = reqwest::Client::new();
 
     let token_result = client
         .exchange_code(AuthorizationCode::new(code.to_string()))
+        .set_pkce_verifier(pkce_verifier)
         .request_async(&http_client)
         .await
         .map_err(|e| format!("token exchange failed: {}", e))?;
@@ -151,14 +172,19 @@ pub async fn exchange_code(
 }
 
 /// Refresh an expired access token.
+/// For public clients (PKCE, no client_secret), the refresh request is sent
+/// without a secret — the provider accepts it for native/desktop apps.
 pub async fn refresh_access_token(
     config: &OAuthConfig,
     refresh_token: &str,
 ) -> Result<OAuthTokens, String> {
-    let client = BasicClient::new(ClientId::new(config.client_id.clone()))
-        .set_client_secret(ClientSecret::new(config.client_secret.clone()))
+    let mut client = BasicClient::new(ClientId::new(config.client_id.clone()))
         .set_auth_uri(AuthUrl::new(config.auth_url.clone()).map_err(|e| e.to_string())?)
         .set_token_uri(TokenUrl::new(config.token_url.clone()).map_err(|e| e.to_string())?);
+
+    if let Some(ref secret) = config.client_secret {
+        client = client.set_client_secret(ClientSecret::new(secret.clone()));
+    }
 
     let http_client = reqwest::Client::new();
 

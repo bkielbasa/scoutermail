@@ -25,10 +25,6 @@
   let oauthTokens: any = null;
   let oauthProvider: string = '';
 
-  // OAuth client credentials (user must provide these)
-  let oauthClientId = '';
-  let oauthClientSecret = '';
-
   async function selectProvider(provider: string): Promise<void> {
     error = '';
     success = '';
@@ -48,20 +44,11 @@
 
   async function startOAuthFlow(provider: string): Promise<void> {
     oauthLoading = true;
+    oauthProvider = provider;
     error = '';
     success = '';
     try {
-      if (!oauthClientId || !oauthClientSecret) {
-        error = 'Please enter OAuth Client ID and Client Secret first.';
-        oauthLoading = false;
-        return;
-      }
-
-      const authUrl = await invoke<string>('start_oauth', {
-        provider,
-        clientId: oauthClientId,
-        clientSecret: oauthClientSecret,
-      });
+      const authUrl = await invoke<string>('start_oauth', { provider });
       await open(authUrl);
 
       // Wait for callback
@@ -161,18 +148,8 @@
     <h1 class="setup-title">Welcome to ScouterMail</h1>
     <p class="setup-subtitle">Add your first email account to get started.</p>
 
-    <div class="provider-buttons">
-      <button class="provider-btn" on:click={() => selectProvider('gmail')} type="button">Gmail</button>
-      <button class="provider-btn" on:click={() => selectProvider('outlook')} type="button">Outlook</button>
-      <button class="provider-btn" on:click={() => selectProvider('yahoo')} type="button">Yahoo</button>
-    </div>
-
     <div class="oauth-section">
-      <p class="oauth-label">Or sign in with OAuth2:</p>
-      <div class="oauth-creds">
-        <input class="field-input" type="text" bind:value={oauthClientId} placeholder="OAuth Client ID" />
-        <input class="field-input" type="password" bind:value={oauthClientSecret} placeholder="OAuth Client Secret" />
-      </div>
+      <p class="oauth-label">Sign in with SSO:</p>
       <div class="oauth-buttons">
         <button class="oauth-btn google" on:click={() => startOAuthFlow('google')} disabled={oauthLoading} type="button">
           {#if oauthLoading && oauthProvider === 'google'}Waiting...{:else}Sign in with Google{/if}
@@ -184,6 +161,16 @@
       {#if oauthTokens}
         <div class="success-banner">OAuth2 authenticated as {oauthProvider}. Fill in your details below and save.</div>
       {/if}
+    </div>
+
+    <div class="manual-separator">
+      <span>or enter credentials manually</span>
+    </div>
+
+    <div class="provider-buttons">
+      <button class="provider-btn" on:click={() => selectProvider('gmail')} type="button">Gmail</button>
+      <button class="provider-btn" on:click={() => selectProvider('outlook')} type="button">Outlook</button>
+      <button class="provider-btn" on:click={() => selectProvider('yahoo')} type="button">Yahoo</button>
     </div>
 
     {#if error}
@@ -419,43 +406,34 @@
 
   .oauth-section {
     margin-bottom: 16px;
-    padding: 12px;
+    padding: 16px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 6px;
   }
 
   .oauth-label {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
     font-family: var(--font-mono);
-  }
-
-  .oauth-creds {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .oauth-creds .field-input {
-    flex: 1;
-    font-size: 12px;
+    font-weight: 500;
   }
 
   .oauth-buttons {
     display: flex;
-    gap: 8px;
+    gap: 10px;
   }
 
   .oauth-btn {
     flex: 1;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
     cursor: pointer;
-    font-family: var(--font-mono);
-    font-size: 12px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
     color: white;
     transition: filter 0.15s;
   }
@@ -467,7 +445,6 @@
 
   .oauth-btn.google {
     background: #4285f4;
-    border-color: #4285f4;
   }
 
   .oauth-btn.google:hover:not(:disabled) {
@@ -476,10 +453,27 @@
 
   .oauth-btn.microsoft {
     background: #00a4ef;
-    border-color: #00a4ef;
   }
 
   .oauth-btn.microsoft:hover:not(:disabled) {
     filter: brightness(1.1);
+  }
+
+  .manual-separator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-family: var(--font-mono);
+  }
+
+  .manual-separator::before,
+  .manual-separator::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
   }
 </style>
