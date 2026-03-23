@@ -17,6 +17,9 @@ pub struct SmtpConfig {
     pub port: u16,
     pub username: String,
     pub password: String,
+    /// When set, use XOAUTH2 instead of plain credentials.
+    /// Contains the email address for the XOAUTH2 SASL string.
+    pub oauth_access_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,21 +94,37 @@ pub async fn send_email(config: &SmtpConfig, email: &ComposeEmail) -> Result<(),
             .map_err(|e| SmtpError::Send(format!("failed to build message: {}", e)))?
     };
 
-    let creds = Credentials::new(config.username.clone(), config.password.clone());
+    let creds = if let Some(ref access_token) = config.oauth_access_token {
+        // XOAUTH2: lettre Credentials with username = email, password = access_token
+        // and the XOAUTH2 mechanism
+        Credentials::new(config.username.clone(), access_token.clone())
+    } else {
+        Credentials::new(config.username.clone(), config.password.clone())
+    };
 
     // Port 465 uses implicit TLS; port 587/25 use STARTTLS
     let transport = if config.port == 465 {
-        AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
+        let mut builder = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
             .map_err(|e| SmtpError::Send(format!("failed to create SMTP transport: {}", e)))?
             .port(config.port)
-            .credentials(creds)
-            .build()
+            .credentials(creds);
+        if config.oauth_access_token.is_some() {
+            builder = builder.authentication(vec![
+                lettre::transport::smtp::authentication::Mechanism::Xoauth2,
+            ]);
+        }
+        builder.build()
     } else {
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)
+        let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)
             .map_err(|e| SmtpError::Send(format!("failed to create SMTP transport: {}", e)))?
             .port(config.port)
-            .credentials(creds)
-            .build()
+            .credentials(creds);
+        if config.oauth_access_token.is_some() {
+            builder = builder.authentication(vec![
+                lettre::transport::smtp::authentication::Mechanism::Xoauth2,
+            ]);
+        }
+        builder.build()
     };
 
     transport

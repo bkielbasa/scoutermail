@@ -5,7 +5,9 @@ use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::accounts::keychain;
 use crate::accounts::manager::{AccountConfig, AccountManager};
+use crate::accounts::oauth::{self, OAuthConfig, OAuthTokens};
 use crate::calendar::parser::build_ics_reply;
 use crate::imap::client::{self as imap_client, ImapConfig};
 use crate::smtp::client::ComposeEmail;
@@ -21,6 +23,12 @@ use serde::Serialize;
 pub struct AppState {
     pub account_manager: Arc<Mutex<AccountManager>>,
     pub active_account: Arc<Mutex<Option<String>>>,
+    /// OAuth flow state: receiver for the auth code from the local callback server.
+    pub oauth_receiver: Arc<Mutex<Option<std::sync::mpsc::Receiver<String>>>>,
+    /// OAuth flow state: the config used to start the flow.
+    pub oauth_config: Arc<Mutex<Option<OAuthConfig>>>,
+    /// OAuth flow state: the port used by the callback server.
+    pub oauth_port: Arc<Mutex<Option<u16>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +45,19 @@ pub struct AddAccountRequest {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub username: String,
+    /// `"password"` or `"oauth2"`. Defaults to `"password"`.
+    #[serde(default = "default_auth_method")]
+    pub auth_method: String,
+    /// The OAuth provider name: `"google"` or `"microsoft"`.
+    #[serde(default)]
+    pub oauth_provider: Option<String>,
+    /// Pre-obtained OAuth tokens (from the OAuth flow).
+    #[serde(default)]
+    pub oauth_tokens: Option<OAuthTokens>,
+}
+
+fn default_auth_method() -> String {
+    "password".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +92,95 @@ async fn open_db(state: &State<'_, AppState>) -> Result<Database, String> {
     Database::open(&db_path_str).map_err(|e| e.to_string())
 }
 
+/// Obtain a valid access token for an OAuth account, refreshing if expired.
+/// Returns the access token string.
+async fn get_valid_oauth_token(account: &AccountConfig) -> Result<String, String> {
+    let tokens = keychain::get_oauth_tokens(&account.id)
+        .ok_or_else(|| "no OAuth tokens stored for account".to_string())?;
+
+    // Check if token is expired (with 60s buffer)
+    let now = chrono::Utc::now().timestamp();
+    if let Some(expires_at) = tokens.expires_at {
+        if now >= expires_at - 60 {
+            // Need to refresh
+            let refresh_token = tokens
+                .refresh_token
+                .as_deref()
+                .ok_or("access token expired and no refresh token available")?;
+            let provider = account
+                .oauth_provider
+                .as_deref()
+                .ok_or("no oauth_provider set")?;
+
+            // We need client_id/secret. Read from the stored oauth tokens is not enough,
+            // we need to get them from settings or the config. For simplicity, we store
+            // them as a setting. But we don't have a DB here. Instead, use the provider
+            // default config with placeholder -- the caller should have set these.
+            // For refresh, we need the original client_id/secret. Store them alongside tokens.
+            // Actually, let's store them in the tokens file.
+            // For now, return an error directing the user to re-authenticate.
+
+            // Try reading client_id/secret from the oauth_config stored in keychain
+            let config_key = format!("{}_oauth_config", account.id);
+            let config: oauth::OAuthConfig = keychain::get_password(&config_key)
+                .ok()
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .ok_or("OAuth token expired. Please re-authenticate.")?;
+
+            let new_tokens =
+                oauth::refresh_access_token(&config, refresh_token).await?;
+            keychain::store_oauth_tokens(&account.id, &new_tokens)
+                .map_err(|e| e.to_string())?;
+            return Ok(new_tokens.access_token);
+        }
+    }
+
+    Ok(tokens.access_token)
+}
+
+/// Connect to IMAP for the given account, handling both password and OAuth auth methods.
+async fn connect_imap_for_account(
+    account: &AccountConfig,
+    imap_config: &ImapConfig,
+    max_retries: u32,
+) -> Result<imap_client::ImapSession, String> {
+    if account.auth_method == "oauth2" {
+        let access_token = get_valid_oauth_token(account).await?;
+        imap_client::connect_xoauth2_with_retry(
+            &account.imap_host,
+            account.imap_port,
+            &account.email,
+            &access_token,
+            max_retries,
+        )
+        .await
+        .map_err(|e| e.to_string())
+    } else {
+        imap_client::connect_with_retry(imap_config, max_retries)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Build an SmtpConfig for the given account, including OAuth token if applicable.
+async fn get_smtp_config_with_oauth(
+    account: &AccountConfig,
+    base_smtp: &crate::smtp::client::SmtpConfig,
+) -> Result<crate::smtp::client::SmtpConfig, String> {
+    if account.auth_method == "oauth2" {
+        let access_token = get_valid_oauth_token(account).await?;
+        Ok(crate::smtp::client::SmtpConfig {
+            host: base_smtp.host.clone(),
+            port: base_smtp.port,
+            username: account.email.clone(),
+            password: String::new(),
+            oauth_access_token: Some(access_token),
+        })
+    } else {
+        Ok(base_smtp.clone())
+    }
+}
+
 /// Open the Tantivy search index for the active account.
 async fn open_search_index(state: &State<'_, AppState>) -> Result<SearchIndex, String> {
     let id = get_active_id(state).await?;
@@ -98,9 +208,28 @@ pub async fn add_account(
         smtp_host: req.smtp_host,
         smtp_port: req.smtp_port,
         username: req.username,
+        auth_method: req.auth_method.clone(),
+        oauth_provider: req.oauth_provider,
     };
+
+    let password = if req.auth_method == "oauth2" {
+        // For OAuth accounts, store tokens and use a placeholder password
+        if let Some(tokens) = &req.oauth_tokens {
+            keychain::store_oauth_tokens(&id, tokens).map_err(|e| e.to_string())?;
+        }
+        // Also persist the OAuthConfig (with client_id/secret) so token refresh works later.
+        if let Some(oauth_cfg) = state.oauth_config.lock().await.as_ref() {
+            let config_json = serde_json::to_string(oauth_cfg).map_err(|e| e.to_string())?;
+            let config_key = format!("{}_oauth_config", id);
+            keychain::store_password(&config_key, &config_json).map_err(|e| e.to_string())?;
+        }
+        String::new()
+    } else {
+        req.password
+    };
+
     let mut mgr = state.account_manager.lock().await;
-    mgr.add_account(config, &req.password)
+    mgr.add_account(config, &password)
         .map_err(|e| e.to_string())?;
     Ok(id)
 }
@@ -142,6 +271,65 @@ pub async fn get_provider_defaults(
     provider: String,
 ) -> Result<Option<(String, u16, String, u16)>, String> {
     Ok(crate::accounts::manager::provider_defaults(&provider))
+}
+
+// ---------------------------------------------------------------------------
+// OAuth commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn start_oauth(
+    state: State<'_, AppState>,
+    provider: String,
+    client_id: String,
+    client_secret: String,
+) -> Result<String, String> {
+    let config = match provider.as_str() {
+        "google" => oauth::google_config(&client_id, &client_secret),
+        "microsoft" => oauth::microsoft_config(&client_id, &client_secret),
+        _ => return Err("unsupported provider".into()),
+    };
+
+    let (auth_url, port, rx) = oauth::start_oauth_flow(&config)?;
+
+    *state.oauth_receiver.lock().await = Some(rx);
+    *state.oauth_config.lock().await = Some(config);
+    *state.oauth_port.lock().await = Some(port);
+
+    Ok(auth_url)
+}
+
+#[tauri::command]
+pub async fn complete_oauth(state: State<'_, AppState>) -> Result<OAuthTokens, String> {
+    let rx = state
+        .oauth_receiver
+        .lock()
+        .await
+        .take()
+        .ok_or("no OAuth flow in progress")?;
+    let config = state
+        .oauth_config
+        .lock()
+        .await
+        .clone()
+        .ok_or("no OAuth config")?;
+    let port = state
+        .oauth_port
+        .lock()
+        .await
+        .take()
+        .ok_or("no OAuth port")?;
+
+    // Wait for the callback in a blocking thread to avoid blocking the async runtime.
+    let code = tokio::task::spawn_blocking(move || {
+        rx.recv_timeout(std::time::Duration::from_secs(300))
+            .map_err(|_| "OAuth timeout -- no callback received within 5 minutes".to_string())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking failed: {}", e))??;
+
+    let tokens = oauth::exchange_code(&config, &code, port).await?;
+    Ok(tokens)
 }
 
 // ---------------------------------------------------------------------------
@@ -268,12 +456,13 @@ pub async fn sync_folder(
     let id = get_active_id(&state).await?;
 
     // Gather paths and config while holding the lock, then release it.
-    let (imap_config, db_path, idx_path) = {
+    let (imap_config, account, db_path, idx_path) = {
         let mgr = state.account_manager.lock().await;
         let imap_cfg = mgr.get_imap_config(&id).map_err(|e| e.to_string())?;
+        let acct = mgr.get_account(&id).map_err(|e| e.to_string())?.clone();
         let db_p = mgr.db_path(&id).to_string_lossy().to_string();
         let idx_p = mgr.search_index_path(&id);
-        (imap_cfg, db_p, idx_p)
+        (imap_cfg, acct, db_p, idx_p)
     };
 
     // Run the IMAP sync + DB work on a blocking thread so that the
@@ -282,9 +471,7 @@ pub async fn sync_folder(
     let handle = tokio::runtime::Handle::current();
     let messages = tokio::task::spawn_blocking(move || {
         handle.block_on(async move {
-            let mut session = imap_client::connect_with_retry(&imap_config, 3)
-                .await
-                .map_err(|e| e.to_string())?;
+            let mut session = connect_imap_for_account(&account, &imap_config, 3).await?;
 
             let db = Database::open(&db_path).map_err(|e| e.to_string())?;
 
@@ -432,15 +619,17 @@ pub async fn send_email(
     req: SendEmailRequest,
 ) -> Result<(), String> {
     let id = get_active_id(&state).await?;
-    let (smtp_config, from_email) = {
+    let (base_smtp_config, account) = {
         let mgr = state.account_manager.lock().await;
         let smtp = mgr.get_smtp_config(&id).map_err(|e| e.to_string())?;
-        let account = mgr.get_account(&id).map_err(|e| e.to_string())?;
-        (smtp, account.email.clone())
+        let acct = mgr.get_account(&id).map_err(|e| e.to_string())?.clone();
+        (smtp, acct)
     };
 
+    let smtp_config = get_smtp_config_with_oauth(&account, &base_smtp_config).await?;
+
     let compose = ComposeEmail {
-        from: from_email,
+        from: account.email.clone(),
         to: req.to,
         cc: req.cc,
         bcc: req.bcc,
@@ -473,9 +662,11 @@ pub async fn update_flags(
 
     // Try to sync flags to IMAP server (best-effort, don't fail if IMAP is unreachable)
     let id = get_active_id(&state).await?;
-    let imap_config = {
+    let (imap_config, account) = {
         let mgr = state.account_manager.lock().await;
-        mgr.get_imap_config(&id).map_err(|e| e.to_string())?
+        let imap_cfg = mgr.get_imap_config(&id).map_err(|e| e.to_string())?;
+        let acct = mgr.get_account(&id).map_err(|e| e.to_string())?.clone();
+        (imap_cfg, acct)
     };
 
     // Map flag names to IMAP flag format
@@ -497,7 +688,7 @@ pub async fn update_flags(
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async move {
-            match imap_client::connect_with_retry(&imap_config, 2).await {
+            match connect_imap_for_account(&account, &imap_config, 2).await {
                 Ok(mut session) => {
                     let _ = imap_client::set_flags(&mut session, uid, &folder_clone, &imap_flags_str).await;
                     let _ = session.logout().await;
@@ -533,9 +724,11 @@ pub async fn move_message(
     to_folder: String,
 ) -> Result<(), String> {
     let id = get_active_id(&state).await?;
-    let imap_config = {
+    let (imap_config, account) = {
         let mgr = state.account_manager.lock().await;
-        mgr.get_imap_config(&id).map_err(|e| e.to_string())?
+        let imap_cfg = mgr.get_imap_config(&id).map_err(|e| e.to_string())?;
+        let acct = mgr.get_account(&id).map_err(|e| e.to_string())?.clone();
+        (imap_cfg, acct)
     };
 
     // Move on IMAP server (uses spawn_blocking like sync_folder to avoid Send issues)
@@ -544,9 +737,7 @@ pub async fn move_message(
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         handle.block_on(async move {
-            let mut session = imap_client::connect_with_retry(&imap_config, 3)
-                .await
-                .map_err(|e| e.to_string())?;
+            let mut session = connect_imap_for_account(&account, &imap_config, 3).await?;
             imap_client::move_message(&mut session, uid, &from, &to)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -681,12 +872,15 @@ pub async fn respond_to_invite(
         .to_string();
 
     let id = get_active_id(&state).await?;
-    let (smtp_config, from_email) = {
+    let (base_smtp_config, account_clone) = {
         let mgr = state.account_manager.lock().await;
         let smtp = mgr.get_smtp_config(&id).map_err(|e| e.to_string())?;
-        let account = mgr.get_account(&id).map_err(|e| e.to_string())?;
-        (smtp, account.email.clone())
+        let acct = mgr.get_account(&id).map_err(|e| e.to_string())?.clone();
+        (smtp, acct)
     };
+
+    let smtp_config = get_smtp_config_with_oauth(&account_clone, &base_smtp_config).await?;
+    let from_email = account_clone.email.clone();
 
     // Build the calendar event from the stored event for the reply builder
     let cal_event = crate::calendar::parser::CalendarEvent {
@@ -1079,13 +1273,16 @@ pub async fn check_scheduled(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     let id = get_active_id(&state).await?;
-    let (smtp_config, from_email, db_path) = {
+    let (base_smtp_config, account_for_scheduled, db_path) = {
         let mgr = state.account_manager.lock().await;
         let smtp = mgr.get_smtp_config(&id).map_err(|e| e.to_string())?;
-        let account = mgr.get_account(&id).map_err(|e| e.to_string())?;
+        let acct = mgr.get_account(&id).map_err(|e| e.to_string())?.clone();
         let db_p = mgr.db_path(&id).to_string_lossy().to_string();
-        (smtp, account.email.clone(), db_p)
+        (smtp, acct, db_p)
     };
+
+    let smtp_config = get_smtp_config_with_oauth(&account_for_scheduled, &base_smtp_config).await?;
+    let from_email = account_for_scheduled.email.clone();
 
     let db = Database::open(&db_path).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().timestamp();

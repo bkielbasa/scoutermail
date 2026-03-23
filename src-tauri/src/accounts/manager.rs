@@ -40,6 +40,16 @@ pub struct AccountConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub username: String,
+    /// `"password"` (default) or `"oauth2"`.
+    #[serde(default = "default_auth_method")]
+    pub auth_method: String,
+    /// `"google"` or `"microsoft"` when `auth_method` is `"oauth2"`.
+    #[serde(default)]
+    pub oauth_provider: Option<String>,
+}
+
+fn default_auth_method() -> String {
+    "password".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -166,12 +176,13 @@ impl AccountManager {
     /// from the Keychain.
     pub fn get_smtp_config(&self, id: &str) -> Result<SmtpConfig, AccountError> {
         let account = self.get_account(id)?;
-        let password = keychain::get_password(id)?;
+        let password = keychain::get_password(id).unwrap_or_default();
         Ok(SmtpConfig {
             host: account.smtp_host.clone(),
             port: account.smtp_port,
             username: account.username.clone(),
             password,
+            oauth_access_token: None,
         })
     }
 
@@ -183,5 +194,31 @@ impl AccountManager {
     /// Path to the Tantivy search index directory for the given account.
     pub fn search_index_path(&self, id: &str) -> PathBuf {
         self.data_dir.join(id).join("search_index")
+    }
+
+    /// Build an `OAuthConfig` for the given account, reading client_id/secret
+    /// from the per-account settings stored alongside the DB.
+    pub fn get_oauth_config(
+        &self,
+        id: &str,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Result<crate::accounts::oauth::OAuthConfig, AccountError> {
+        let account = self.get_account(id)?;
+        let provider = account
+            .oauth_provider
+            .as_deref()
+            .ok_or_else(|| AccountError::NotFound("no oauth_provider set".into()))?;
+        let config = match provider {
+            "google" => crate::accounts::oauth::google_config(client_id, client_secret),
+            "microsoft" => crate::accounts::oauth::microsoft_config(client_id, client_secret),
+            _ => {
+                return Err(AccountError::NotFound(format!(
+                    "unsupported oauth provider: {}",
+                    provider
+                )))
+            }
+        };
+        Ok(config)
     }
 }

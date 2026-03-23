@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { open } from '@tauri-apps/plugin-shell';
   import { accounts, activeAccount } from '$lib/stores/accounts';
 
   const dispatch = createEventDispatcher();
@@ -19,6 +20,15 @@
   let error = '';
   let success = '';
 
+  // OAuth state
+  let oauthLoading = false;
+  let oauthTokens: any = null;
+  let oauthProvider: string = '';
+
+  // OAuth client credentials (user must provide these)
+  let oauthClientId = '';
+  let oauthClientSecret = '';
+
   async function selectProvider(provider: string): Promise<void> {
     error = '';
     success = '';
@@ -33,6 +43,51 @@
       }
     } catch (err: unknown) {
       error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function startOAuthFlow(provider: string): Promise<void> {
+    oauthLoading = true;
+    error = '';
+    success = '';
+    try {
+      if (!oauthClientId || !oauthClientSecret) {
+        error = 'Please enter OAuth Client ID and Client Secret first.';
+        oauthLoading = false;
+        return;
+      }
+
+      const authUrl = await invoke<string>('start_oauth', {
+        provider,
+        clientId: oauthClientId,
+        clientSecret: oauthClientSecret,
+      });
+      await open(authUrl);
+
+      // Wait for callback
+      const tokens = await invoke<any>('complete_oauth');
+
+      oauthTokens = tokens;
+      oauthProvider = provider;
+
+      // Auto-fill server settings
+      if (provider === 'google') {
+        imapHost = 'imap.gmail.com';
+        imapPort = 993;
+        smtpHost = 'smtp.gmail.com';
+        smtpPort = 465;
+      } else if (provider === 'microsoft') {
+        imapHost = 'outlook.office365.com';
+        imapPort = 993;
+        smtpHost = 'smtp.office365.com';
+        smtpPort = 587;
+      }
+
+      success = 'Authenticated! Enter your email and name, then save.';
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      oauthLoading = false;
     }
   }
 
@@ -60,17 +115,20 @@
     success = '';
     saving = true;
     try {
-      // add_account returns just the account ID string
+      const isOAuth = oauthTokens !== null;
       const id = await invoke<string>('add_account', {
         req: {
           name,
           email,
-          password,
+          password: isOAuth ? '' : password,
           imap_host: imapHost,
           imap_port: imapPort,
           smtp_host: smtpHost,
           smtp_port: smtpPort,
           username: username || email,
+          auth_method: isOAuth ? 'oauth2' : 'password',
+          oauth_provider: isOAuth ? oauthProvider : null,
+          oauth_tokens: oauthTokens,
         },
       });
 
@@ -107,6 +165,25 @@
       <button class="provider-btn" on:click={() => selectProvider('gmail')} type="button">Gmail</button>
       <button class="provider-btn" on:click={() => selectProvider('outlook')} type="button">Outlook</button>
       <button class="provider-btn" on:click={() => selectProvider('yahoo')} type="button">Yahoo</button>
+    </div>
+
+    <div class="oauth-section">
+      <p class="oauth-label">Or sign in with OAuth2:</p>
+      <div class="oauth-creds">
+        <input class="field-input" type="text" bind:value={oauthClientId} placeholder="OAuth Client ID" />
+        <input class="field-input" type="password" bind:value={oauthClientSecret} placeholder="OAuth Client Secret" />
+      </div>
+      <div class="oauth-buttons">
+        <button class="oauth-btn google" on:click={() => startOAuthFlow('google')} disabled={oauthLoading} type="button">
+          {#if oauthLoading && oauthProvider === 'google'}Waiting...{:else}Sign in with Google{/if}
+        </button>
+        <button class="oauth-btn microsoft" on:click={() => startOAuthFlow('microsoft')} disabled={oauthLoading} type="button">
+          {#if oauthLoading && oauthProvider === 'microsoft'}Waiting...{:else}Sign in with Microsoft{/if}
+        </button>
+      </div>
+      {#if oauthTokens}
+        <div class="success-banner">OAuth2 authenticated as {oauthProvider}. Fill in your details below and save.</div>
+      {/if}
     </div>
 
     {#if error}
@@ -162,7 +239,7 @@
       <button class="action-btn test-btn" on:click={testConnection} disabled={testing || !imapHost || !password} type="button">
         {#if testing}Testing...{:else}Test Connection{/if}
       </button>
-      <button class="action-btn save-btn" on:click={saveAccount} disabled={saving || !name || !email || !password || !imapHost || !smtpHost} type="button">
+      <button class="action-btn save-btn" on:click={saveAccount} disabled={saving || !name || !email || (!password && !oauthTokens) || !imapHost || !smtpHost} type="button">
         {#if saving}Saving...{:else}Save Account{/if}
       </button>
     </div>
@@ -338,5 +415,71 @@
 
   .save-btn:hover:not(:disabled) {
     filter: brightness(1.15);
+  }
+
+  .oauth-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  .oauth-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+  }
+
+  .oauth-creds {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .oauth-creds .field-input {
+    flex: 1;
+    font-size: 12px;
+  }
+
+  .oauth-buttons {
+    display: flex;
+    gap: 8px;
+  }
+
+  .oauth-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: white;
+    transition: filter 0.15s;
+  }
+
+  .oauth-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .oauth-btn.google {
+    background: #4285f4;
+    border-color: #4285f4;
+  }
+
+  .oauth-btn.google:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  .oauth-btn.microsoft {
+    background: #00a4ef;
+    border-color: #00a4ef;
+  }
+
+  .oauth-btn.microsoft:hover:not(:disabled) {
+    filter: brightness(1.1);
   }
 </style>

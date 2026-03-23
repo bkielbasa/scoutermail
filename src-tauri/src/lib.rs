@@ -31,6 +31,9 @@ pub fn run() {
     let app_state = AppState {
         account_manager: Arc::new(Mutex::new(account_manager)),
         active_account: Arc::new(Mutex::new(None)),
+        oauth_receiver: Arc::new(Mutex::new(None)),
+        oauth_config: Arc::new(Mutex::new(None)),
+        oauth_port: Arc::new(Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -119,6 +122,8 @@ pub fn run() {
             commands::get_scheduled,
             commands::delete_scheduled,
             commands::check_scheduled,
+            commands::start_oauth,
+            commands::complete_oauth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

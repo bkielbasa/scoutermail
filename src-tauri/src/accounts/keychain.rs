@@ -64,3 +64,29 @@ pub fn delete_password(account_id: &str) -> Result<(), KeychainError> {
     passwords.remove(account_id);
     save_passwords(&passwords)
 }
+
+/// Store OAuth tokens as JSON under `{account_id}_oauth_tokens`.
+pub fn store_oauth_tokens(
+    account_id: &str,
+    tokens: &crate::accounts::oauth::OAuthTokens,
+) -> Result<(), KeychainError> {
+    let key = format!("{}_oauth_tokens", account_id);
+    let json =
+        serde_json::to_string(tokens).map_err(|e| KeychainError::SecFramework(e.to_string()))?;
+    store_password(&key, &json)
+}
+
+/// Retrieve OAuth tokens for an account, if they exist.
+pub fn get_oauth_tokens(
+    account_id: &str,
+) -> Option<crate::accounts::oauth::OAuthTokens> {
+    let key = format!("{}_oauth_tokens", account_id);
+    let json = get_password(&key).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+/// Delete OAuth tokens for an account.
+pub fn delete_oauth_tokens(account_id: &str) -> Result<(), KeychainError> {
+    let key = format!("{}_oauth_tokens", account_id);
+    delete_password(&key)
+}

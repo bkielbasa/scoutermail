@@ -1,3 +1,4 @@
+use async_imap::Authenticator;
 use async_native_tls::TlsStream;
 use futures::StreamExt;
 use thiserror::Error;
@@ -79,6 +80,97 @@ pub async fn connect(config: &ImapConfig) -> Result<ImapSession, ImapError> {
         .map_err(|(e, _client)| ImapError::Auth(format!("login failed: {}", e)))?;
 
     Ok(session)
+}
+
+// ---------------------------------------------------------------------------
+// XOAUTH2 authenticator
+// ---------------------------------------------------------------------------
+
+/// SASL XOAUTH2 authenticator for async-imap.
+struct XOAuth2 {
+    response: Vec<u8>,
+}
+
+impl XOAuth2 {
+    fn new(email: &str, access_token: &str) -> Self {
+        let s = format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token);
+        Self {
+            response: s.into_bytes(),
+        }
+    }
+}
+
+impl Authenticator for XOAuth2 {
+    type Response = Vec<u8>;
+
+    fn process(&mut self, _challenge: &[u8]) -> Self::Response {
+        self.response.clone()
+    }
+}
+
+/// Connect to an IMAP server over TLS using XOAUTH2 authentication.
+pub async fn connect_xoauth2(
+    host: &str,
+    port: u16,
+    email: &str,
+    access_token: &str,
+) -> Result<ImapSession, ImapError> {
+    let addr = format!("{}:{}", host, port);
+    let tcp_stream = TcpStream::connect(&addr)
+        .await
+        .map_err(|e| ImapError::Connection(format!("TCP connect to {}: {}", addr, e)))?;
+
+    let tls_connector = async_native_tls::TlsConnector::new();
+    let tls_stream = tls_connector
+        .connect(host, tcp_stream)
+        .await
+        .map_err(|e| ImapError::Connection(format!("TLS handshake with {}: {}", host, e)))?;
+
+    let mut client = async_imap::Client::new(tls_stream);
+    let _greeting = client
+        .read_response()
+        .await
+        .ok_or_else(|| ImapError::Connection("no server greeting received".to_string()))?
+        .map_err(|e| ImapError::Connection(format!("error reading greeting: {}", e)))?;
+
+    let auth = XOAuth2::new(email, access_token);
+    let session = client
+        .authenticate("XOAUTH2", auth)
+        .await
+        .map_err(|(e, _client)| ImapError::Auth(format!("XOAUTH2 auth failed: {}", e)))?;
+
+    Ok(session)
+}
+
+/// Connect to IMAP with XOAUTH2 and retry logic.
+pub async fn connect_xoauth2_with_retry(
+    host: &str,
+    port: u16,
+    email: &str,
+    access_token: &str,
+    max_retries: u32,
+) -> Result<ImapSession, ImapError> {
+    let mut retries = 0;
+    loop {
+        match connect_xoauth2(host, port, email, access_token).await {
+            Ok(session) => return Ok(session),
+            Err(e) => {
+                retries += 1;
+                if retries >= max_retries {
+                    return Err(e);
+                }
+                let delay = std::time::Duration::from_secs(2u64.pow(retries.min(5)));
+                log::warn!(
+                    "IMAP XOAUTH2 connection failed (attempt {}/{}): {}, retrying in {:?}",
+                    retries,
+                    max_retries,
+                    e,
+                    delay
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
 }
 
 /// Connect to an IMAP server with exponential backoff retry logic.
