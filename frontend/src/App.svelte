@@ -33,6 +33,7 @@
   let showDrafts = false;
   let showRules = false;
   let showSignatureEditor = false;
+  let showAddAccount = false;
   let initialDraft: any = null;
   let hasAccounts = false;
   let showOnboarding = false;
@@ -191,6 +192,13 @@
     // :signature command
     registerHandler('cmd:signature', () => {
       showSignatureEditor = !showSignatureEditor;
+    });
+
+    // :account command
+    registerHandler('cmd:account', (args?: string) => {
+      if (args?.trim() === 'add' || !args) {
+        showAddAccount = true;
+      }
     });
 
     // :unified command — show unified inbox across all accounts
@@ -573,6 +581,18 @@
   {#if showSignatureEditor}
     <SignatureEditor on:close={() => (showSignatureEditor = false)} />
   {/if}
+  {#if showAddAccount}
+    <div class="overlay-backdrop" on:click={() => (showAddAccount = false)}>
+      <div class="overlay-panel" on:click|stopPropagation>
+        <AccountSetup on:done={async () => {
+          showAddAccount = false;
+          const accts = await invoke('list_accounts');
+          accounts.set(accts);
+          showToast('Account added', 'success');
+        }} />
+      </div>
+    </div>
+  {/if}
   <ToastContainer />
 </div>
 
@@ -602,6 +622,21 @@
   }
   .reading-pane {
     flex: 1;
+    overflow-y: auto;
+  }
+  .overlay-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  .overlay-panel {
+    max-width: 560px;
+    width: 100%;
+    max-height: 90vh;
     overflow-y: auto;
   }
 </style>
